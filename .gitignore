@@ -7,3 +7,7 @@ data/
 *.parquet
 *.duckdb
 output/
+.pytest_cache/
+.ruff_cache/
+dist/
+*.egg-info/
