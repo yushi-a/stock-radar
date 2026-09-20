@@ -2,7 +2,7 @@
 
 第一弾のゴール：**手元で `stock-radar run --market us` を叩くと、候補 CSV が出て notificator に通知が飛ぶ。**
 
-Kill 条件監視・フィードバック記録・pollux の CronJob 化・日本株対応は第一弾のスコープ外（合意済み）。
+Kill 条件監視・フィードバック記録・K3s CronJob 化・日本株対応は第一弾のスコープ外（合意済み）。
 
 各フェーズに検証項目を置く。ここを飛ばすと、誤った財務値の上に条件を積んでしまい、
 出てきた候補が正しいのかどうか判断できなくなる。
@@ -62,7 +62,7 @@ Kill 条件監視・フィードバック記録・pollux の CronJob 化・日�
 - CSV：`output/2026-09-20_us.csv`
   列は `docs/skill-integration.md` のたたき台＋各指標のデータソースと基準日（決算期・取得日）
 - 通知：実行日、ユニバース件数、通過件数（トラック別）、上位銘柄、CSV パス
-  - 送信先は yuxsr-dev クラスタ（k8s）にデプロイ済みの自前アプリ `notificator`
+  - 送信先は同一クラスタ内にデプロイ済みの自前アプリ `notificator`（CronJob 化後は Service 名で到達可能）
   - **インターフェース（エンドポイント・ペイロード形式・認証）は未確認。実装時に確認する**
   - 通知は Phase 5 の最後に回す。CSV 出力までが動けば運用は始められるため、ここをブロッカーにしない
 - CLI：`stock-radar run --market us --config config/criteria.yaml`
@@ -70,7 +70,9 @@ Kill 条件監視・フィードバック記録・pollux の CronJob 化・日�
 
 ## 第一弾より後
 
-1. pollux の K3s CronJob 化（実行時刻をここで決定。推奨は土曜朝 JST）
+1. K3s CronJob 化（実行時刻をここで決定。推奨は土曜朝 JST）
+   - local PVC を使う場合、Pod は `pollux` ノードに固定される（`docs/architecture.md` 参照）
+   - DuckDB ファイルのバックアップ方法もここで決める
 2. 前週差分・Kill 条件監視（`screen_results` の履歴を使う）
 3. 日本株対応（J-Quants。プラン選定を再検討する）
 4. 評価スキルへの CSV 入口の追加、フィードバック記録

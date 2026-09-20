@@ -5,10 +5,10 @@
 詳細は `docs/architecture.md` を参照。
 
 - 初回対象は**米国株**。SEC EDGAR + yfinance で完全無料。日本株は第一弾より後。
-- 実行基盤：まずローカル CLI、安定後に pollux の K3s CronJob（PVC 利用）。
+- 実行基盤：まずローカル CLI、安定後に K3s CronJob（クラスタ `yuxsr-dev` / ノード `pollux`、local PVC 利用）。
 - ストレージ：DuckDB 単一ファイル（`data/stock_radar.duckdb`）。生の zip はファイルで保持。
 - スタック：Python + uv。
-- 出力：CSV + 通知。通知先は yuxsr-dev クラスタ（k8s）にデプロイ済みの自前アプリ `notificator`。
+- 出力：CSV + 通知。通知先は同一クラスタ内にデプロイ済みの自前アプリ `notificator`（Service 名で到達可能）。
 - 会計期間：年次（10-K）主、売上のみ四半期（10-Q）も保持。
 - ユニバース：金融・REIT 除外（SIC 6000番台）、ADR 除外（10-K 提出企業のみ）、売上ゼロ除外。
 - トラックB の「予想売上成長率」は米国に会社予想が無いため、**直近四半期 YoY ≥ 20%** で代替。
@@ -19,7 +19,7 @@
 
 ### 実装開始までに決めるもの
 - [ ] `notificator` のインターフェース（エンドポイント・ペイロード形式・認証）の確認。実装時でよい
-- [ ] 実行基盤として想定している pollux と、notificator が動いている yuxsr-dev が同一クラスタかどうか（別なら CronJob からの到達経路を確認する）
+- [ ] local PVC を使う場合の DuckDB ファイルのバックアップ方法（local PVC はノードローカルで冗長性が無く、株価履歴の再取得には時間がかかる）
 
 ### 実装しながら決めるもの
 - [ ] 各閾値の最終確定（`config/criteria.example.yaml` をたたき台に、Phase 4 の通過件数を見て調整）

@@ -10,9 +10,9 @@
 | 財務ソース | SEC EDGAR `companyfacts.zip` | 全社分を1回のダウンロードで取得でき、レート制限を気にせず全銘柄処理できる |
 | 株価ソース | yfinance（失敗時 FMP） | 無料。429 対策としてスロットリング・差分取得・再開可能性を設計に織り込む |
 | 言語 / パッケージ管理 | Python + uv | `pyproject.toml` + `uv.lock`。Docker イメージ化も容易 |
-| ストレージ | DuckDB 単一ファイル（`data/stock_radar.duckdb`） | pollux で PVC が使えるため、単一ファイルがそのまま載る。SQL で閾値適用と履歴比較が書ける |
-| 実行基盤 | まずローカル CLI → 安定後に pollux の K3s CronJob | コンテナ化を見据えた構成にはしておく |
-| 出力 | CSV + 通知（notificator） | 通知は yuxsr-dev クラスタ（k8s）にデプロイ済みの自前アプリ `notificator` に送る。インターフェースは実装時に確認する |
+| ストレージ | DuckDB 単一ファイル（`data/stock_radar.duckdb`） | local PVC が使えるため、単一ファイルがそのまま載る。SQL で閾値適用と履歴比較が書ける |
+| 実行基盤 | まずローカル CLI → 安定後に K3s CronJob（クラスタ `yuxsr-dev`） | コンテナ化を見据えた構成にはしておく |
+| 出力 | CSV + 通知（notificator） | 同一クラスタ内にデプロイ済みの自前アプリ `notificator` に送る。Service 名で到達できる。インターフェースは実装時に確認する |
 | 会計期間 | 年次（10-K）主、売上のみ四半期（10-Q）も保持 | Yartseva も年次ベース。四半期は トラックB の売上 YoY にのみ使う |
 | 実行タイミング | **未定**（CronJob 化フェーズで決定） | 第一弾は手動実行のため実害なし。推奨は土曜朝 JST（米国市場の週の取引終了直後） |
 
@@ -97,7 +97,7 @@ src/stock_radar/
 - R3: 週次スナップショットを履歴として残し、週次で差分比較できる
 - R4: 閾値変更 → 再取得なしで再スクリーニングできる（`fundamentals` + `market_metrics` が残っていれば満たせる）
 - R5: データソースを差し替えられる（yfinance → FMP、将来の J-Quants Free → Standard）
-- R6: ローカル実行で育て、pollux の CronJob に載せ替えても状態が引き継げる（PVC に DuckDB ファイルを置く）
+- R6: ローカル実行で育て、K3s の CronJob に載せ替えても状態が引き継げる（PVC に DuckDB ファイルを置く）
 
 J-Quants 規約によりデータはリポジトリにコミットしない（`data/` は `.gitignore` 済み）。
 米国 SEC データに再配布制限は無いが、運用を揃えるため同じ扱いにする。
@@ -123,6 +123,25 @@ REVENUE = [
 `DepreciationAmortizationAndAccretionNet` / CF計算書にしか現れない / 未開示）、ここに実装コストの大半が乗る。
 Yartseva の「資産を膨らませているのに収益が伴わない企業を外す」という趣旨は EBIT（`OperatingIncomeLoss`、タグが安定）で保てるため、
 **資産成長率 − EBIT成長率 ≤ 0** で代用する。後から EBITDA に差し替えられる形にしておく。
+
+## デプロイ先の前提（k8s）
+
+| 用語 | 指すもの |
+|---|---|
+| `yuxsr-dev` | クラスタ名 |
+| `pollux` | クラスタ内のノード名 |
+
+第一弾ではローカル CLI 実行のみだが、CronJob 化フェーズで効いてくる制約を先に書いておく。
+
+- **local PVC はノードローカル**。DuckDB ファイルを local-path の PVC に置く場合、
+  そのボリュームは `pollux` ノードのディスク上に作られ、**Pod は `pollux` に固定される**
+  （local-path provisioner は PV にノードアフィニティを付けるため、実質的に自動で pin される）。
+  マルチノード構成にしてもこの CronJob は `pollux` でしか動かない点を前提にする。
+- **バックアップはノード障害に対して無防備**。local PVC はレプリケーションされない。
+  `fundamentals` / `prices_daily` / `screen_results` は再取得に時間がかかる（特に株価の履歴）ため、
+  CronJob 化のタイミングで DuckDB ファイルの退避方法を決める。
+- **通知の到達経路**。`notificator` は同一クラスタ内で動いているため、
+  Service 名（ClusterIP）で直接叩ける。Ingress を経由する必要はない。
 
 ## SEC アクセスの作法
 
