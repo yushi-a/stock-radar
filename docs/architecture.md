@@ -32,7 +32,7 @@
    約4,500社 → 約2,000社                        [ネットワーク1回・あとはローカル処理]
 
 ③ 株価を取得
-   ②の通過分だけ yfinance で日次2年分（差分追記）
+   ②の通過分だけ yfinance で日次1年3ヶ月分（差分追記）
    → 時価総額・平均売買代金・52週高安
    約2,000社                                     [ここだけが重い。初回フル、以降は差分]
 
@@ -44,6 +44,8 @@
 
 時価総額は `dei:EntityCommonStockSharesOutstanding`（XBRL 表紙の発行済株式数）× 株価で自前計算する。
 yfinance の `marketCap` には依存せず、照合にのみ使う（「一次情報優先」方針に沿う）。
+ただし `marketCap` の取得は `history()` とは別リクエストになりリクエスト数が倍になるため、
+**照合は Phase 3 の検証時にサンプル（200銘柄程度）で1回行うだけにし、定常運用では取得しない。**
 
 ## モジュール構成（案）
 
@@ -80,7 +82,8 @@ src/stock_radar/
 | `facts_annual` | 縦持ち。cik, fiscal_year, period_end, concept, value, unit, accn, filed_at | 再生成可（zip があれば） |
 | `facts_quarterly` | 同上。売上関連のみ | 再生成可 |
 | `fundamentals` | 横持ち・正規化後。revenue, operating_income, net_income, total_assets, equity, cfo, capex, gross_profit, shares_outstanding, `source_concepts`(JSON) | **必要** |
-| `prices_daily` | ticker, date, ohlc, adj_close, volume | **必要**（差分追記） |
+| `prices_daily` | ticker, date, open, high, low, close, volume。主キー `(ticker, date)` | **必要**（差分追記） |
+| `fetch_failures` | ticker, last_attempt, error, retry_count。翌日リトライ用のキュー | **必要** |
 | `market_metrics` | ticker, as_of, market_cap, avg_daily_value, high_52w, low_52w, range_position_52w, drawdown_from_52w_high | 再生成可 |
 | `screen_runs` | run_id, run_at, `criteria_snapshot`(JSON), universe_size, passed_count | **必要** |
 | `screen_results` | run_id, cik, ticker, track, passed_filters, timing_score, 各指標値, data_source, as_of | **必要** |
@@ -89,6 +92,9 @@ src/stock_radar/
 これにより「この結果はどの閾値で出たか」を後から完全に再現でき、閾値調整の試行錯誤が記録として残る。
 
 生の `companyfacts.zip` は DuckDB には入れず `data/raw/sec/companyfacts_YYYY-MM-DD.zip` としてファイルで保持する。
+**保持は最新1世代のみ**とし、取得・パース後に古い世代を削除する。1ファイルが1GB超あり、
+週次で世代を残すと年50GBを超えるため。過去時点の財務値を再現したくなった場合は、
+`fundamentals.accn`（提出番号）から SEC に個別に取りに行く。
 
 ### 永続化の要件（合意済み）
 
@@ -124,6 +130,70 @@ REVENUE = [
 Yartseva の「資産を膨らませているのに収益が伴わない企業を外す」という趣旨は EBIT（`OperatingIncomeLoss`、タグが安定）で保てるため、
 **資産成長率 − EBIT成長率 ≤ 0** で代用する。後から EBITDA に差し替えられる形にしておく。
 
+## 株価取得の設計（③）
+
+### 前提：yfinance は1銘柄1リクエスト
+
+`yf.download()` に複数ティッカーを渡しても、内部ではティッカーごとに個別のHTTPリクエストを投げている。
+**リクエスト数は対象銘柄数そのもの**（約2,000回）で、差分取得しても減らない。減るのはペイロードだけ。
+429 対策の主役は、②で対象を半減させておくことと、直列化（`threads=False`）＋スリープ。
+1リクエスト1秒として30〜40分。週次なら許容範囲とする。
+
+### 差分更新と、株式分割の遡及調整
+
+銘柄ごとに `prices_daily` の `max(date)` を見て、その翌日以降を取得する。履歴が無い新規銘柄はフル取得に分岐する。
+
+ここで必ず手当てが要るのが**株式分割**。yfinance が返す `close` / `high` / `low` / `volume` は分割調整済みのため、
+分割が起きると**過去の株価がすべて遡及的に書き換わる**。差分追記では古い行が調整前の値のまま残り、
+分割をまたいだ瞬間に 52週高値が実態とかけ離れた値になる（存在しない暴落として記録され、タイミング加点が誤る）。
+`volume` も同じ理由で壊れ、平均売買代金が誤る。
+
+対策として、**差分取得の開始日を `max(date) − 5営業日` にして、重複期間の `close` を既存データと突き合わせる。**
+
+- 一致する → そのまま追記（通常ケース）
+- 食い違う → 遡及調整が入った → **その銘柄だけフル再取得して置き換える**
+
+5営業日分の余計な取得はリクエスト数を変えない（1銘柄1リクエストのため）ので、コストはゼロ。
+株式分割・株式併合に加え、Yahoo 側の過去データ修正も同じ仕組みで捕捉できる。
+保険として月1回はウィンドウ全体をフル再取得する。
+
+### `adj_close` は保存しない
+
+配当調整済み価格で、配当が出るたびに過去の値が遡及的に書き換わる。
+かつ**現在の指標で使っている箇所が1つも無い**（52週高安は `high`/`low`、平均売買代金は `close × volume`、
+時価総額は `close`）。保存すると「古い値が残り続けるが誰も気づかない」罠だけが残るため、列ごと持たない。
+
+取得は `auto_adjust=False` で行う。`close`/`high`/`low` は分割調整済み・配当未調整となり、
+「実際に株価がどこを通ってきたか」を見る 52週高安の用途に合う。
+
+### 失敗時の扱い
+
+429 は指数バックオフ。リトライ上限を超えた銘柄は `fetch_failures` に積んで**次の銘柄へ進む**（全体を止めない）。
+失敗分は翌日リトライ。取得失敗が継続する銘柄は上場廃止・ティッカー変更の可能性があるため、
+`universe` の情報が古いというシグナルとして扱う。
+
+## ファイルサイズの見積もり
+
+前提：ユニバース4,500社 / 株価取得2,000銘柄 / 年次財務10年分 / 株価1年3ヶ月（315営業日）/ 週次52回。
+
+| テーブル | 行数 | 初期 | 年間増分 |
+|---|---|---|---|
+| `universe` | 約10,000（除外分含む） | 2MB | 0 |
+| `facts_annual` | 約68万行 | 15〜20MB | +2MB |
+| `facts_quarterly` | 約54万行 | 5〜10MB | +1MB |
+| `fundamentals` | 4.5万行 | 10〜20MB | +2MB |
+| `prices_daily` | 約63万行 | 20〜25MB | +20MB |
+| `market_metrics` | 2,000行 | 1MB | 0 |
+| `screen_runs` / `screen_results` | 約1,500行/年 | — | +0.6MB |
+
+**DuckDB ファイルは差分追記でも10年で270MB程度**。制約にならない。
+
+容量を食うのは `companyfacts.zip`（1GB超）の方で、こちらは最新1世代のみ保持する（前述）。
+定常的に必要な容量は **3〜5GB 程度**（zip 1世代 + DuckDB + 作業領域）。
+
+なお DuckDB は DELETE してもファイルが縮まない（解放ブロックは内部で再利用される）。
+分割検知によるフル再取得が多発した場合などにファイルが膨らんだら、`VACUUM` か再構築で縮める。
+
 ## デプロイ先の前提（k8s）
 
 | 用語 | 指すもの |
@@ -142,6 +212,9 @@ Yartseva の「資産を膨らませているのに収益が伴わない企業�
   CronJob 化のタイミングで DuckDB ファイルの退避方法を決める。
 - **通知の到達経路**。`notificator` は同一クラスタ内で動いているため、
   Service 名（ClusterIP）で直接叩ける。Ingress を経由する必要はない。
+- **CronJob には `concurrencyPolicy: Forbid` を設定する**。DuckDB は1プロセスしか書き込みモードで
+  ファイルを開けない。③が30〜40分かかるため、前回の実行が終わる前に次が起動する事態は現実に起こりうる。
+- **ノードのディスク空き容量は未確認**。定常3〜5GB を前提に、local PVC を切る前に確認する。
 
 ## SEC アクセスの作法
 
@@ -157,3 +230,4 @@ Yartseva の「資産を膨らませているのに収益が伴わない企業�
 | XBRL の欠損率が想定より高い | Phase 2 の検証で欠損率を計測して出力し、早期に判明させる |
 | 通過数が0件または数百件になる | `criteria_snapshot` を使って閾値調整の試行を記録。Phase 4 の検証項目に「通過数が20〜30件のオーダーか」を入れる |
 | 通知先 `notificator` のインターフェースが未確認 | 第一弾では通知を最後に実装する。CSV 出力までが動けば運用は始められるため、ブロッカーにはしない |
+| 株式分割の遡及調整で `prices_daily` が壊れる | 差分取得時に重複期間の `close` を突き合わせて検知し、該当銘柄をフル再取得（前述）。月1回のフル再取得も併用 |
