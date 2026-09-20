@@ -5,10 +5,26 @@
 
 ## ステータス
 
-- 設計完了・実装前（2026-09-20時点）。
+- 設計完了。実装は Phase 0（足場）から進行中（2026-09-20時点）。進捗は [issue #1](https://github.com/yushi-a/stock-radar/issues/1)。
 - **初回対象は米国株**（SEC EDGAR + yfinance で完全無料）。日本株は第一弾より後。
 - システム構成は合意済み：Python + uv / DuckDB 単一ファイル / まずローカル CLI、安定後に K3s CronJob（クラスタ `yuxsr-dev`） / 出力は CSV + 通知（notificator）。
-- 次は `docs/implementation-plan.md` の Phase 0 から。
+- 実装計画は [docs/implementation-plan.md](docs/implementation-plan.md)。
+
+## 開発
+
+Python は uv で管理する（`.python-version` のバージョンが自動で用意される）。
+
+```bash
+uv sync                      # 依存の取得と仮想環境の作成
+uv run ruff check .          # lint
+uv run ruff format .         # 整形
+uv run pytest                # テスト
+```
+
+テストはソケットを塞いだ状態で走る（`pytest-socket`）。実 API への疎通確認は自動テストにせず、
+手動スモークテストに留める。方針は [docs/testing.md](docs/testing.md) を参照。
+
+環境変数は `.env.example` をコピーして `.env` を作る。
 
 ## ドキュメント
 

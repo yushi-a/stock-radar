@@ -1,0 +1,46 @@
+[project]
+name = "stock-radar"
+version = "0.1.0"
+description = "全上場銘柄から数年で数倍になりうる候補を週次で抽出するスクリーナー"
+readme = "README.md"
+requires-python = ">=3.12"
+# 実行時の依存はフェーズごとに追加する（Phase 0 の足場では不要）。
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stock_radar"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.8",
+    "pytest>=9.1.1",
+    # テスト中の外部アクセスを遮断する。方針は docs/testing.md を参照。
+    "pytest-socket>=0.8.1",
+]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+# docs/ の Markdown 内のコード片は説明用の断片であって、整形対象にしない。
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle
+    "F",   # pyflakes
+    "W",   # pycodestyle warning
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "RUF", # ruff 固有
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# ソケットを既定で塞ぐ。実 API への疎通確認は手動スモークに限る（docs/testing.md）。
+addopts = "--disable-socket --strict-markers"
