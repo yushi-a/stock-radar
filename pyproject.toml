@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 # 実行時の依存はフェーズごとに追加する（Phase 0 の足場では不要）。
 dependencies = [
+    "duckdb>=1.5.5",
     "pydantic>=2.13.5",
     "pyyaml>=6.0.3",
 ]
