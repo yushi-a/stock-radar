@@ -22,15 +22,17 @@
 - [ ] local PVC を使う場合の DuckDB ファイルのバックアップ方法（local PVC はノードローカルで冗長性が無い）
 - [ ] `pollux` ノードのディスク空き容量の確認。定常3〜5GB（`companyfacts.zip` 1世代 + DuckDB + 作業領域）を必要とする
 
-### Phase 2a（データ構造の実地調査）で決めるもの
+### Phase 2a（データ構造の実地調査）で決めたもの
 
-`companyfacts` の実データを見てから判断する。詳細は `docs/implementation-plan.md` の Phase 2a。
+2026-09-20 に実測して確定。**結論と根拠は `docs/xbrl-findings.md`。**
 
-- [ ] A：年次レコードの選定ルール（修正再提出の扱い、決算期変更による非12ヶ月期間のガード、時点値と期間値の区別）
-- [ ] B：四半期の YTD → 3ヶ月変換ルール
-- [ ] C：複数クラス株の株数合算（`companyfacts` に軸付きファクトが含まれるかの検証を含む）
-- [ ] D：指標ごとの欠損率の計測。結果によっては**スクリーニング条件の見直しをユーザーと再合意する**
-- [ ] XBRL タグの優先順位リストの具体的な中身
+- [x] A：年次レコードの選定ルール。`fy` は使わず `start`/`end` で束ね、350〜380日でガードし、`filed` が最新を採る
+- [x] B：四半期の YTD → 3ヶ月変換は**不要だった**（92.4% が3ヶ月値を直接報告している）
+- [x] C：**`companyfacts` に軸付きファクトは含まれない**（仮説は当たり）。複数クラス株では `dei` の株数タグが欠落するため、`WeightedAverageNumberOfDilutedSharesOutstanding` を第1候補にする
+- [x] D：欠損率を計測。**`GrossProfit` は 28.8% が算出不能**
+- [x] XBRL タグの優先順位リスト → `src/stock_radar/sources/sec/concepts.py`
+
+- [ ] 🔴 **`track_b.gross_margin` をハードフィルタのまま残すか**（`docs/xbrl-findings.md` の提案を参照）。ユーザー判断待ち
 
 ### 実装しながら決めるもの
 - [ ] 各閾値の最終確定（`config/criteria.yaml` の初版をたたき台に、Phase 4 の通過件数を見て調整）
