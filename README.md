@@ -5,7 +5,7 @@
 
 ## ステータス
 
-- 設計完了。**Phase 0（足場・設定・DuckDB スキーマ）まで実装済み**（2026-09-20時点）。進捗は [issue #1](https://github.com/yushi-a/stock-radar/issues/1)。
+- 設計完了。**Phase 1（ユニバース確定）まで実装済み**（2026-09-20時点）。進捗は [issue #1](https://github.com/yushi-a/stock-radar/issues/1)。
 - **初回対象は米国株**（SEC EDGAR + yfinance で完全無料）。日本株は第一弾より後。
 - システム構成は合意済み：Python + uv / DuckDB 単一ファイル / まずローカル CLI、安定後に K3s CronJob（クラスタ `yuxsr-dev`） / 出力は CSV + 通知（notificator）。
 - 実装計画は [docs/implementation-plan.md](docs/implementation-plan.md)。
@@ -26,6 +26,15 @@ uv run pytest                # テスト
 
 環境変数は `.env.example` をコピーして `.env` を作り、`set -a; source .env; set +a` で読み込む。
 （CLI からの自動読み込みは Phase 5 で入れる。K8s では ConfigMap と env で渡す。）
+
+### 実行
+
+```bash
+uv run stock-radar fetch-universe      # SEC からユニバースを取得して universe を作る
+```
+
+初回は `submissions.zip`（1.5GB）を落とすので数分かかる。2回目以降は
+`sec.submissions_max_age_days`（既定7日）より新しければ手元のものを使う。
 
 ## ドキュメント
 
