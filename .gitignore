@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+# 取得データは J-Quants 規約上コミットしない
+data/
+*.parquet
+*.duckdb
+output/
