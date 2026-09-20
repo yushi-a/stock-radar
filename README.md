@@ -5,7 +5,7 @@
 
 ## ステータス
 
-- 設計完了。実装は Phase 0（足場）から進行中（2026-09-20時点）。進捗は [issue #1](https://github.com/yushi-a/stock-radar/issues/1)。
+- 設計完了。**Phase 0（足場・設定・DuckDB スキーマ）まで実装済み**（2026-09-20時点）。進捗は [issue #1](https://github.com/yushi-a/stock-radar/issues/1)。
 - **初回対象は米国株**（SEC EDGAR + yfinance で完全無料）。日本株は第一弾より後。
 - システム構成は合意済み：Python + uv / DuckDB 単一ファイル / まずローカル CLI、安定後に K3s CronJob（クラスタ `yuxsr-dev`） / 出力は CSV + 通知（notificator）。
 - 実装計画は [docs/implementation-plan.md](docs/implementation-plan.md)。

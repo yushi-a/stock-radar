@@ -9,8 +9,11 @@
 
 ## 現在地
 
-**設計合意済み・実装前。** 米国株版から実装する。
-次にやることは `docs/implementation-plan.md` の Phase 0 から。
+**Phase 0 完了。** 米国株版から実装している。進捗と決定ログは [issue #1](https://github.com/yushi-a/stock-radar/issues/1)。
+次にやることは `docs/implementation-plan.md` の Phase 1（ユニバース確定）から。
+
+入っているもの：uv / ruff / pytest（`pytest-socket` でソケット遮断）/ GitHub Actions CI、
+`config.py` と `config/criteria.yaml` `config/runtime.yaml`、`storage.py`（DuckDB スキーマ）。
 
 Phase 2a（データ構造の実地調査）は、`companyfacts` の実データを見て正規化ルールを決めるフェーズ。
 成果物はコードではなく調査ノートと決定事項で、ここの結論次第では
@@ -24,6 +27,12 @@ Phase 2a（データ構造の実地調査）は、`companyfacts` の実データ
 - `docs/screening-criteria.md` — 条件と閾値、およびその根拠（米国版の読み替えを含む）
 - `docs/skill-integration.md` — スクリーナーが「やらないこと」
 - `docs/open-questions.md` — 未決事項。ここにある項目は独断で決めず、ユーザーに確認する
+
+## 進め方
+
+- 1 PR = 1タスク（目安300〜500行）。**テストが緑なら Claude が自動マージして次へ進む**（ユーザー承認済み）
+- ゲート G1〜G5（issue #1 参照）に当たったら止まってユーザーに確認する
+- タスク issue はフェーズに入る直前に作る。マージのたびに issue #1 のチェックと決定ログを更新する
 
 ## 守ること
 
