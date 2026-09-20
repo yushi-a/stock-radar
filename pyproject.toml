@@ -5,7 +5,10 @@ description = "全上場銘柄から数年で数倍になりうる候補を週�
 readme = "README.md"
 requires-python = ">=3.12"
 # 実行時の依存はフェーズごとに追加する（Phase 0 の足場では不要）。
-dependencies = []
+dependencies = [
+    "pydantic>=2.13.5",
+    "pyyaml>=6.0.3",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -38,6 +41,13 @@ select = [
     "B",   # flake8-bugbear
     "SIM", # flake8-simplify
     "RUF", # ruff 固有
+]
+ignore = [
+    # 全角の括弧・句読点を「紛らわしい文字」として警告する。コメントを日本語で書く
+    # 方針（CLAUDE.md）なので全面的に誤検知になる。
+    "RUF001",
+    "RUF002",
+    "RUF003",
 ]
 
 [tool.pytest.ini_options]

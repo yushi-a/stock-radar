@@ -24,7 +24,8 @@ uv run pytest                # テスト
 テストはソケットを塞いだ状態で走る（`pytest-socket`）。実 API への疎通確認は自動テストにせず、
 手動スモークテストに留める。方針は [docs/testing.md](docs/testing.md) を参照。
 
-環境変数は `.env.example` をコピーして `.env` を作る。
+環境変数は `.env.example` をコピーして `.env` を作り、`set -a; source .env; set +a` で読み込む。
+（CLI からの自動読み込みは Phase 5 で入れる。K8s では ConfigMap と env で渡す。）
 
 ## ドキュメント
 
@@ -38,7 +39,8 @@ uv run pytest                # テスト
 | [docs/data-sources.md](docs/data-sources.md) | 証券会社スクリーナー／API の調査結果 |
 | [docs/skill-integration.md](docs/skill-integration.md) | 評価スキルとの役割分担・連携方針 |
 | [docs/open-questions.md](docs/open-questions.md) | 未決事項と次のステップ |
-| [config/criteria.example.yaml](config/criteria.example.yaml) | 条件定義のたたき台 |
+| [config/criteria.yaml](config/criteria.yaml) | スクリーニング条件（閾値と根拠） |
+| [config/runtime.yaml](config/runtime.yaml) | 運用パラメータ（スロットリング・時間予算・出力先） |
 
 ## 基本方針
 

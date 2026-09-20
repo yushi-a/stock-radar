@@ -1,0 +1,76 @@
+# スクリーニング条件。根拠となる実証研究と閾値の読み替えは docs/screening-criteria.md を参照。
+#
+# このファイルは「判定条件」だけを持つ。実行時に screen_runs.criteria_snapshot へそのまま
+# 記録されるため、スロットリングや時間予算などの運用パラメータは混ぜない（config/runtime.yaml）。
+#
+# 閾値は未確定。Phase 4 で通過件数（目安20〜30件）を見ながら詰める。
+# 変更の履歴は git と screen_runs.criteria_snapshot の両方に残る。
+
+# 市場ごとの通貨単位。金額の閾値がどちらの通貨かをコードから判別するために持つ。
+markets:
+  us:
+    currency: USD
+  jp:
+    currency: JPY
+
+# 共通足切り。トラック A / B のどちらに進むにも、まずここを通る。
+common:
+  # 市場ごとに単位が違う金額の閾値。markets.<market>.currency の通貨で書く。
+  by_market:
+    us:
+      # 下限: Yartseva の10倍銘柄の時価総額中央値 $348M / 上限: 既存フレーム
+      market_cap: { min: 300_000_000, max: 8_000_000_000 }
+      avg_daily_value: { min: 5_000_000 }   # 見解
+    jp:
+      # 岡三は 50億〜500億円。上限は見解
+      market_cap: { min: 5_000_000_000, max: 100_000_000_000 }
+      avg_daily_value: { min: 50_000_000 }  # 見解
+
+  equity_positive: true
+  # 臨床段階バイオ・SPAC を除外する。売上を分母に持つ指標が計算不能になるため。
+  revenue_positive: true
+  # 米国は SIC 6000番台で判定する。
+  exclude_sectors: [banks, insurance, securities, other_financials, reit]
+  # 10-K 提出企業のみ。20-F/6-K は開示頻度・会計基準・XBRL の揃い方が異なる。
+  us_exclude_adr: true
+
+# トラックA：黒字・割安型（Yartseva 準拠）
+track_a:
+  revenue_cagr_3y: { min: 0.10 }
+  # 米国は「黒字であること」だけを見る（min: 0 を含まない）。日本は岡三条件の5%。
+  op_margin:
+    by_market:
+      us: { min: 0.0, exclusive: true }
+      jp: { min: 0.05 }
+  fcf_yield: { min: 0.04 }
+  pbr: { max: 2.5 }              # B/M >= 0.4
+  # どちらか一方を満たせばよい。
+  profitability_any:
+    roa: { min: 0.05 }
+    roe: { min: 0.10 }
+  # 米国第一弾は EBITDA ではなく EBIT（営業利益）で代用する。減価償却費は XBRL の
+  # タグ揺れが激しく実装コストが跳ね上がるため。趣旨（資産を膨らませているのに
+  # 収益が伴わない企業を外す）は EBIT でも保てる。docs/architecture.md 参照。
+  asset_growth_minus_ebit_growth: { max: 0.0 }
+
+# トラックB：高成長型（赤字許容、見解ベース）
+track_b:
+  revenue_growth_yoy: { min: 0.25 }
+  # 米国には会社予想が無い（10-K/10-Q にガイダンスは含まれない）ため、
+  # 直近四半期の前年同期比で代替する。日本版では会社予想（FSales）を使う。
+  revenue_growth_latest_quarter_yoy: { min: 0.20 }
+  op_margin: { min: -0.20 }      # 評価スキルの PSR 切替境界
+  gross_margin: { min: 0.40 }
+  psr: { max: 8.0 }
+  # どちらか一方を満たせばよい。
+  financial_buffer_any:
+    equity_ratio: { min: 0.50 }
+    current_ratio: { min: 1.5 }
+
+# 並べ替え用の加点。ハードフィルタにはしない。
+timing_bonus:
+  drawdown_from_52w_high: { min: -0.50, max: -0.20 }
+  range_position_52w: { max: 0.50 }
+  # 日本株でのみ使う項目。米国では評価しない。
+  jp_years_since_listing: { max: 10 }
+  jp_owner_in_top3_holders: true
