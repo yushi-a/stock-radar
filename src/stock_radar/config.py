@@ -216,6 +216,9 @@ class SecRuntime(_Model):
     min_request_interval_sec: float = Field(gt=0)
     max_attempts: int = Field(ge=1)
     retry_backoff_sec: float = Field(ge=0)
+    # submissions.zip は 1.5GB あるが、ユニバースは週次では動かない。
+    # これより新しいファイルが手元にあれば再取得しない。
+    submissions_max_age_days: int = Field(ge=0)
 
 
 class ThrottleRuntime(_Model):

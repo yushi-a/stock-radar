@@ -17,6 +17,9 @@ sec:
   max_attempts: 3
   # 指数バックオフの初項。Retry-After があればそちらを優先する。
   retry_backoff_sec: 2.0
+  # submissions.zip は 1.5GB。ユニバース（上場・SIC・提出フォーム）は週次では
+  # ほとんど動かないので、毎回落とさない。
+  submissions_max_age_days: 7
 
 prices:
   window_days: 315            # 取得ウィンドウ（52週 + 余裕）
