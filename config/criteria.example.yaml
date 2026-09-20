@@ -9,7 +9,9 @@ common:
     market_cap_jpy: { min: 5_000_000_000, max: 100_000_000_000 }  # 岡三は 50億〜500億円。上限は見解
     avg_daily_value_jpy: { min: 50_000_000 }                      # 見解
   equity_positive: true
-  exclude_sectors: [banks, insurance, securities, other_financials, reit]
+  exclude_sectors: [banks, insurance, securities, other_financials, reit]  # 米国は SIC 6000番台で判定
+  revenue_positive: true      # 臨床段階バイオ・SPAC を除外（売上基準の指標が計算不能になるため）
+  us_exclude_adr: true        # 10-K 提出企業のみ。20-F/6-K は開示頻度・会計基準・XBRL の揃い方が異なる
 
 track_a:  # 黒字・割安型（Yartseva 準拠）
   revenue_cagr_3y: { min: 0.10 }
@@ -21,11 +23,16 @@ track_a:  # 黒字・割安型（Yartseva 準拠）
   profitability_any:
     roa: { min: 0.05 }
     roe: { min: 0.10 }
-  asset_growth_minus_ebitda_growth: { max: 0.0 }
+  # 米国第一弾は EBITDA ではなく EBIT（営業利益）で代用する。
+  # 減価償却費は XBRL のタグ揺れが激しく実装コストが跳ね上がるため。
+  # 趣旨（資産を膨らませているのに収益が伴わない企業を外す）は EBIT でも保てる。
+  asset_growth_minus_ebit_growth: { max: 0.0 }
 
 track_b:  # 高成長型（赤字許容、見解ベース）
   revenue_growth_yoy: { min: 0.25 }
-  revenue_growth_forecast: { min: 0.20 }
+  # 米国には会社予想が無い（10-K/10-Q にガイダンスは含まれない）ため、
+  # 直近四半期の前年同期比で代替する。日本版では会社予想（FSales）を使う。
+  revenue_growth_latest_quarter_yoy: { min: 0.20 }
   op_margin: { min: -0.20 }   # 評価スキルの PSR 切替境界
   gross_margin: { min: 0.40 }
   psr: { max: 8.0 }
