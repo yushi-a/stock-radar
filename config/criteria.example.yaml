@@ -1,5 +1,9 @@
 # スクリーニング条件のたたき台。根拠は docs/screening-criteria.md を参照。
 # 閾値は未確定。確定後に criteria.yaml としてコピーして使う。
+#
+# このファイルは「判定条件」だけを持つ。実行時に screen_runs.criteria_snapshot へ
+# そのまま記録されるため、スロットリングや時間予算などの運用パラメータは混ぜない。
+# それらは config/runtime.yaml に置く（docs/architecture.md 参照）。
 
 common:
   us:

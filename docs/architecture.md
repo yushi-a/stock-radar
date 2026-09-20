@@ -8,7 +8,8 @@
 |---|---|---|
 | 初回対象 | 米国株 | 10倍銘柄の発生率が日本の3倍以上（米 約7〜8%/15年 vs 日 約2%/10年）。かつ SEC + yfinance で完全無料・データ制約なし。J-Quants は Free のままだと12週遅延・2年分のみで3年CAGRが計算できない |
 | 財務ソース | SEC EDGAR `companyfacts.zip` | 全社分を1回のダウンロードで取得でき、レート制限を気にせず全銘柄処理できる |
-| 株価ソース | yfinance（失敗時 FMP） | 無料。429 対策としてスロットリング・差分取得・再開可能性を設計に織り込む |
+| 株価ソース | yfinance（失敗時 FMP） | 無料。429 対策として適応型スロットリング・差分取得・再開可能性を設計に織り込む |
+| 性能要件 | 週1回完走すればよい。**1回の実行に丸1日以上かかっても構わない** | この緩さが 429 対策の設計方針を決めている（後述） |
 | 言語 / パッケージ管理 | Python + uv | `pyproject.toml` + `uv.lock`。Docker イメージ化も容易 |
 | ストレージ | DuckDB 単一ファイル（`data/stock_radar.duckdb`） | local PVC が使えるため、単一ファイルがそのまま載る。SQL で閾値適用と履歴比較が書ける |
 | 実行基盤 | まずローカル CLI → 安定後に K3s CronJob（クラスタ `yuxsr-dev`） | コンテナ化を見据えた構成にはしておく |
@@ -61,7 +62,7 @@ src/stock_radar/
       concepts.py           XBRL タグの優先順位マッピング（後述）
       normalize.py          年次 / 四半期レコードの正規化
     prices/
-      yfinance_client.py    差分取得・スロットリング・リトライ
+      yfinance_client.py    差分取得・適応型スロットリング・サーキットブレーカー・リトライ
   metrics/
     fundamentals.py         売上CAGR・利益率・FCF・ROA/ROE・資産成長率
     market.py               時価総額・売買代金・52週高安・PBR/PSR/FCF利回り
@@ -83,9 +84,9 @@ src/stock_radar/
 | `facts_quarterly` | 同上。売上関連のみ | 再生成可 |
 | `fundamentals` | 横持ち・正規化後。revenue, operating_income, net_income, total_assets, equity, cfo, capex, gross_profit, shares_outstanding, `source_concepts`(JSON) | **必要** |
 | `prices_daily` | ticker, date, open, high, low, close, volume。主キー `(ticker, date)` | **必要**（差分追記） |
-| `fetch_failures` | ticker, last_attempt, error, retry_count。翌日リトライ用のキュー | **必要** |
+| `fetch_failures` | ticker, `error_class`, attempt_count, last_attempt, last_error。リトライ用のキュー兼、再開時のスキップ判定 | **必要** |
 | `market_metrics` | ticker, as_of, market_cap, avg_daily_value, high_52w, low_52w, range_position_52w, drawdown_from_52w_high | 再生成可 |
-| `screen_runs` | run_id, run_at, `criteria_snapshot`(JSON), universe_size, passed_count | **必要** |
+| `screen_runs` | run_id, run_at, `criteria_snapshot`(JSON), universe_size, passed_count, `price_coverage` | **必要** |
 | `screen_results` | run_id, cik, ticker, track, passed_filters, timing_score, 各指標値, data_source, as_of | **必要** |
 
 `screen_runs.criteria_snapshot` に閾値そのものを保存する。
@@ -136,8 +137,43 @@ Yartseva の「資産を膨らませているのに収益が伴わない企業�
 
 `yf.download()` に複数ティッカーを渡しても、内部ではティッカーごとに個別のHTTPリクエストを投げている。
 **リクエスト数は対象銘柄数そのもの**（約2,000回）で、差分取得しても減らない。減るのはペイロードだけ。
-429 対策の主役は、②で対象を半減させておくことと、直列化（`threads=False`）＋スリープ。
-1リクエスト1秒として30〜40分。週次なら許容範囲とする。
+
+### 方針：429 から回復するのではなく、429 を踏まない
+
+性能要件が「週1回完走すればよい」であり、1回の実行に丸1日以上かけても構わない。
+2,000リクエストに24時間を割り当てれば1件あたり43秒まで許容できるので、速度の余裕は桁違いにある。
+したがって**速く回して429を捌く設計ではなく、最初から遅く回して429を踏まない設計**にする。
+②で対象を半減させておくこと、直列化（`threads=False`）、十分なスリープが主役になる。
+
+### 適応型スロットリング
+
+固定間隔ではなく、Yahoo が許す速度に自動収束させる。
+
+- ベース間隔にジッターを加えて直列実行する
+- **429 を受けたら、そのリクエストだけリトライするのではなく、全体の間隔を倍にする。**
+  Yahoo のレート制限は IP 単位で粘着的なため、1件だけ待って再開するとすぐまた踏む。
+  全体のペースを落とす方が結果的に速く終わる
+- `Retry-After` ヘッダがあればそれを優先する
+- 連続成功が一定回数続いたら間隔を少しずつ戻す（下限あり）
+
+### サーキットブレーカー
+
+適応制御でも収まらない場合の段階的退避。連続429が閾値を超えたら、30分 → 2時間 → 6時間 → 12時間と
+休止時間を伸ばす。IP単位のペナルティは数時間で解ける性質のものなので、
+短いリトライを繰り返すより長く待つ方が有効。丸1日使える前提なら6時間寝てから再開しても間に合う。
+
+### 時間予算と縮退運転
+
+run に壁時計の予算を設ける。超過したら取得を打ち切り、**その時点のデータで④以降を走らせる**。
+差分更新なので、取れなかった分は次回の run に持ち越される。
+
+ただし「どれだけ欠けた状態で判定したか」は必ず記録する。
+
+- `screen_runs` に `price_coverage`（株価取得の成功率）を記録する
+- coverage が閾値を下回ったら**通知に警告を出す**
+- 株価が一定日数以上古い銘柄は CSV に鮮度フラグを付ける
+
+これが無いと、「今週は候補が5件しか出なかった」のが相場のせいなのか取得失敗のせいなのか判別できない。
 
 ### 差分更新と、株式分割の遡及調整
 
@@ -166,11 +202,75 @@ Yartseva の「資産を膨らませているのに収益が伴わない企業�
 取得は `auto_adjust=False` で行う。`close`/`high`/`low` は分割調整済み・配当未調整となり、
 「実際に株価がどこを通ってきたか」を見る 52週高安の用途に合う。
 
-### 失敗時の扱い
+### 失敗時の扱いと再開
 
-429 は指数バックオフ。リトライ上限を超えた銘柄は `fetch_failures` に積んで**次の銘柄へ進む**（全体を止めない）。
-失敗分は翌日リトライ。取得失敗が継続する銘柄は上場廃止・ティッカー変更の可能性があるため、
-`universe` の情報が古いというシグナルとして扱う。
+リトライ上限を超えた銘柄は `fetch_failures` に積んで**次の銘柄へ進む**（全体を止めない）。
+
+**進捗管理用のテーブルは作らない。** 再開に必要な情報は既存の2テーブルから引き算で導出できる。
+
+```
+対象 = ユニバース通過銘柄
+       − prices_daily が最新営業日に達しているもの
+       − fetch_failures で恒久的失敗と判定済みのもの
+```
+
+進捗テーブルはこの引き算を書き写すだけで情報が増えないため、持たない。
+run が終わったかどうか、`price_coverage` がいくつかも同じ2テーブルから導出する。
+
+ただし `fetch_failures` は失敗の**種類**を区別する必要がある。
+
+| `error_class` | 扱い |
+|---|---|
+| 429 | 一時的。次の run でもリトライする |
+| シンボル不正 / データなし | 恒久的の可能性。上場廃止・ティッカー変更を疑い、N回連続なら以降スキップして `universe` が古いシグナルとして扱う |
+| その他 | リトライ |
+
+これを区別しないと、上場廃止銘柄を毎週リトライし続けることになる。逆にここさえ押さえれば進捗管理は不要。
+
+### yfinance のバージョン
+
+429 の挙動は yfinance のバージョンに強く依存する（cookie / crumb の取得方式、ブラウザ偽装の有無など、
+この領域は上流で頻繁に修正されている）。`pyproject.toml` でバージョンをピン留めした上で、
+429 が多発したら**まず上流の新しいバージョンを試す**（自前の制御を疑う前に）。
+
+### 運用パラメータは `config/runtime.yaml` に外出しする
+
+スロットリングも時間予算も、実際に回してみないと適正値が分からない。すべて設定ファイルに置く。
+
+**スクリーニング閾値（`config/criteria.yaml`）とは別ファイルにする。**
+`screen_runs.criteria_snapshot` に記録したいのは判定条件であって、スロットリング設定ではない。
+混ぜると「閾値を変えていないのに snapshot が変わる」状態になる。
+
+```yaml
+prices:
+  window_days: 315            # 取得ウィンドウ（52週 + 余裕）
+  overlap_days: 5             # 遡及調整の検知に使う重複日数
+
+  throttle:
+    base_interval_sec: 3.0
+    jitter_sec: 2.0
+    min_interval_sec: 3.0
+    max_interval_sec: 120.0
+    backoff_multiplier: 2.0
+    recovery_after_successes: 200
+    recovery_factor: 0.9
+
+  circuit_breaker:
+    consecutive_429_threshold: 5
+    pause_sec: [1800, 7200, 21600, 43200]   # 30分 → 2h → 6h → 12h
+
+  budget:
+    max_wall_clock_sec: 72000        # 20時間。あくまで目安であり調整前提
+    on_exceeded: continue_next_run   # 打ち切って次回に持ち越す
+
+  retry:
+    max_attempts_per_run: 3
+    permanent_error_threshold: 3
+
+  coverage_warn_threshold: 0.90
+```
+
+初期値は保守的（間隔は長め、予算も長め）に置き、429 の発生状況を見ながら詰める。
 
 ## ファイルサイズの見積もり
 
@@ -213,7 +313,9 @@ Yartseva の「資産を膨らませているのに収益が伴わない企業�
 - **通知の到達経路**。`notificator` は同一クラスタ内で動いているため、
   Service 名（ClusterIP）で直接叩ける。Ingress を経由する必要はない。
 - **CronJob には `concurrencyPolicy: Forbid` を設定する**。DuckDB は1プロセスしか書き込みモードで
-  ファイルを開けない。③が30〜40分かかるため、前回の実行が終わる前に次が起動する事態は現実に起こりうる。
+  ファイルを開けない。③は丸1日かかりうるため、前回の実行が終わる前に次が起動する事態は現実的なリスク。
+  `activeDeadlineSeconds` は時間予算 + 余裕、`backoffLimit` は低め（リトライはアプリ側の責務）、
+  `restartPolicy: OnFailure` で再起動しても続きから走る。
 - **ノードのディスク空き容量は未確認**。定常3〜5GB を前提に、local PVC を切る前に確認する。
 
 ## SEC アクセスの作法
@@ -226,7 +328,7 @@ Yartseva の「資産を膨らませているのに収益が伴わない企業�
 
 | リスク | 緩和策 |
 |---|---|
-| yfinance の 429 で③が止まる | 差分取得＋再開可能設計。失敗ティッカーをキューに残して翌日リトライ。保険として FMP Starter（$22/月） |
+| yfinance の 429 で③が止まる | 適応型スロットリングで踏まないようにする。踏んだらサーキットブレーカーで長く待つ。時間予算を超えたら縮退運転（coverage を記録して通知で警告）。保険として FMP Starter（$22/月） |
 | XBRL の欠損率が想定より高い | Phase 2 の検証で欠損率を計測して出力し、早期に判明させる |
 | 通過数が0件または数百件になる | `criteria_snapshot` を使って閾値調整の試行を記録。Phase 4 の検証項目に「通過数が20〜30件のオーダーか」を入れる |
 | 通知先 `notificator` のインターフェースが未確認 | 第一弾では通知を最後に実装する。CSV 出力までが動けば運用は始められるため、ブロッカーにはしない |
