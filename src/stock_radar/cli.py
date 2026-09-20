@@ -27,6 +27,7 @@ from stock_radar.sources.sec.companyfacts import (
     store_facts,
     wanted_ciks,
 )
+from stock_radar.sources.sec.normalize import normalize_universe
 from stock_radar.sources.sec.submissions import (
     apply_submission_profiles,
     download_submissions,
@@ -138,6 +139,41 @@ def fetch_facts(runtime: Runtime, db_path: Path, market: Market, *, force: bool)
         print(f"{'facts_quarterly':<22} {quarterly:>9,} 行")
         covered = con.execute("SELECT count(DISTINCT cik) FROM facts_annual").fetchone()[0]
         print(f"{'facts がある企業':<22} {covered:>9,} / {len(keep):,}")
+
+        produced = normalize_universe(con)
+        print(f"{'fundamentals':<22} {produced:>9,} 行")
+        judgeable = con.execute(
+            "SELECT "
+            "  count(*) FILTER (WHERE revenue IS NOT NULL), "
+            "  count(*) FILTER (WHERE gross_profit IS NOT NULL), "
+            "  count(*) FILTER (WHERE operating_income IS NOT NULL), "
+            "  count(*) FILTER (WHERE capex IS NOT NULL), "
+            "  count(DISTINCT cik) "
+            "FROM fundamentals f WHERE f.period_end = ("
+            "  SELECT max(period_end) FROM fundamentals g WHERE g.cik = f.cik)"
+        ).fetchone()
+        companies = judgeable[4]
+        print(f"\n=== 直近年度で値が取れた割合（{companies:,} 社）===")
+        for label, count in zip(
+            ("売上", "粗利", "営業利益", "設備投資"), judgeable[:4], strict=True
+        ):
+            print(f"{label:<22} {count:>9,} = {count / companies:6.1%}")
+
+        # Phase 2a の欠損率は「いずれかの年度で取れるか」で測っている。
+        # 回帰に気づけるよう、同じ定義でも出す（docs/xbrl-findings.md の D）。
+        print("\n=== いずれかの年度で取れた割合（Phase 2a と同じ定義）===")
+        for label, column, measured in (
+            ("売上", "revenue", "91.5%"),
+            ("営業利益", "operating_income", "93.5%"),
+            ("設備投資", "capex", "92.9%"),
+        ):
+            count = con.execute(
+                f"SELECT count(DISTINCT cik) FROM fundamentals WHERE {column} IS NOT NULL"
+            ).fetchone()[0]
+            print(
+                f"{label:<22} {count:>9,} = {count / companies:6.1%}"
+                f"   （Phase 2a の実測 {measured}）"
+            )
 
     # 125万行を丸ごと入れ替えるため、これをやらないと毎回約25MB 増え続ける。
     # DuckDB は DELETE した領域をファイルに返さず、VACUUM も CHECKPOINT も効かない。
