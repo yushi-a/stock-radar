@@ -12,6 +12,11 @@ sec:
   # 取得・パース後に古い世代を削除して最新1世代のみ保持する。
   raw_dir: data/raw/sec
   keep_generations: 1
+  # SEC の fair access は 10 リクエスト/秒。0.15秒間隔で約6.7 req/秒。
+  min_request_interval_sec: 0.15
+  max_attempts: 3
+  # 指数バックオフの初項。Retry-After があればそちらを優先する。
+  retry_backoff_sec: 2.0
 
 prices:
   window_days: 315            # 取得ウィンドウ（52週 + 余裕）

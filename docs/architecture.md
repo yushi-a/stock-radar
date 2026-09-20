@@ -108,6 +108,13 @@ src/stock_radar/
 - `fundamentals.currency` — 「USD 建てで報告しない企業の扱い」（未決）を判断できるようにする
 - `market_metrics.latest_price_date` — 時間予算で打ち切ったときの鮮度フラグ
 
+### 時刻列は tz 無しの UTC
+
+時刻列は `TIMESTAMP`（tz 無し）で、値は常に UTC で入れる。`TIMESTAMPTZ` にすると
+Python へ読み戻すのに `pytz` が要り、かつセッションのタイムゾーンで表示が変わるため、
+ローカル（JST）とコンテナ（UTC）で CSV の値がずれる。
+書く側は `storage.utc_now()` / `storage.as_utc_naive()` を通す。
+
 ### スキーマの移行
 
 `schema_meta` テーブルに `version` を持つ。**バージョンが合わないときは自動で作り直さず、落とす。**

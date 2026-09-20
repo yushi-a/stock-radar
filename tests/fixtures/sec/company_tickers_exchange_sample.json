@@ -1,0 +1,64 @@
+{
+ "fields": [
+  "cik",
+  "name",
+  "ticker",
+  "exchange"
+ ],
+ "data": [
+  [
+   320193,
+   "Apple Inc.",
+   "AAPL",
+   "Nasdaq"
+  ],
+  [
+   1652044,
+   "Alphabet Inc.",
+   "GOOGL",
+   "Nasdaq"
+  ],
+  [
+   1652044,
+   "Alphabet Inc.",
+   "GOOG",
+   "Nasdaq"
+  ],
+  [
+   1067983,
+   "BERKSHIRE HATHAWAY INC",
+   "BRK-A",
+   "NYSE"
+  ],
+  [
+   1067983,
+   "BERKSHIRE HATHAWAY INC",
+   "BRK-B",
+   "NYSE"
+  ],
+  [
+   1374310,
+   "Cboe Global Markets, Inc.",
+   "CBOE",
+   "CBOE"
+  ],
+  [
+   2070829,
+   "Contemporary Amperex Technology Co., Limited/ADR",
+   "CYATY",
+   "OTC"
+  ],
+  [
+   2103884,
+   "Compass Sub North, Inc.",
+   "CONE",
+   null
+  ],
+  [
+   59478,
+   "ELI LILLY & Co",
+   "LLY",
+   "NYSE"
+  ]
+ ]
+}

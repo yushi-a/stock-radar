@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -26,16 +27,24 @@ __all__ = [
     "SchemaVersionError",
     "StorageError",
     "apply_schema",
+    "as_utc_naive",
     "connect",
     "drop_rebuildable",
     "open_database",
     "schema_version",
+    "utc_now",
 ]
 
 DEFAULT_DB_PATH = Path("data/stock_radar.duckdb")
 
+# 時刻列は TIMESTAMP（tz 無し）で、値は常に UTC とする。
+#
+# TIMESTAMPTZ にすると (1) Python へ読み戻すのに pytz が要り、(2) セッションの
+# タイムゾーンで表示が変わる。ローカル（JST）とコンテナ（UTC）で CSV の値が
+# ずれることになるので、UTC の naive に統一して書く側で揃える。
+
 # スキーマを非互換に変えたら上げる。上げ忘れると古いファイルを黙って読むことになる。
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # zip や API から作り直せるテーブル。閾値やタグ優先順位を変えたときに捨てて再構築する。
 REBUILDABLE_TABLES = (
@@ -94,7 +103,7 @@ _DDL: tuple[str, ...] = (
         form_type       VARCHAR,
         -- NULL なら残存。'financial_sic' / 'no_10k' / 'otc' などを入れる。
         excluded_reason VARCHAR,
-        updated_at      TIMESTAMPTZ NOT NULL,
+        updated_at      TIMESTAMP   NOT NULL,
         PRIMARY KEY (market, ticker)
     );
     """,
@@ -196,7 +205,7 @@ _DDL: tuple[str, ...] = (
         -- 上場廃止銘柄を毎週リトライし続けることになる。
         error_class   VARCHAR NOT NULL CHECK (error_class IN ({_ERROR_CLASSES})),
         attempt_count INTEGER NOT NULL DEFAULT 0,
-        last_attempt  TIMESTAMPTZ NOT NULL,
+        last_attempt  TIMESTAMP   NOT NULL,
         last_error    VARCHAR,
         PRIMARY KEY (ticker)
     );
@@ -222,7 +231,7 @@ _DDL: tuple[str, ...] = (
     f"""
     CREATE TABLE IF NOT EXISTS screen_runs (
         run_id            BIGINT PRIMARY KEY DEFAULT nextval('screen_run_id_seq'),
-        run_at            TIMESTAMPTZ NOT NULL,
+        run_at            TIMESTAMP   NOT NULL,
         market            VARCHAR NOT NULL CHECK (market IN ({_MARKETS})),
         -- 判定に使った閾値そのもの。これがあると「この結果はどの閾値で出たか」を
         -- 後から完全に再現でき、閾値調整の試行錯誤が記録として残る。
@@ -275,11 +284,26 @@ _DDL: tuple[str, ...] = (
         fundamentals_filed_at             DATE,
         price_as_of                       DATE,
         data_source                       VARCHAR,
-        as_of                             TIMESTAMPTZ,
+        as_of                             TIMESTAMP,
         PRIMARY KEY (run_id, market, ticker)
     );
     """,
 )
+
+
+def utc_now() -> dt.datetime:
+    """いまの UTC 時刻。tz は落としてある（上の方針）。"""
+    return dt.datetime.now(dt.UTC).replace(tzinfo=None)
+
+
+def as_utc_naive(value: dt.datetime) -> dt.datetime:
+    """DuckDB に入れる形に揃える。
+
+    tz 付きなら UTC に直して tz を落とす。naive はすでに UTC として扱う。
+    """
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(dt.UTC).replace(tzinfo=None)
 
 
 def connect(
