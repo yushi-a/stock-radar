@@ -12,6 +12,9 @@ dependencies = [
     "pyyaml>=6.0.3",
 ]
 
+[project.scripts]
+stock-radar = "stock_radar.cli:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
