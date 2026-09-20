@@ -49,6 +49,8 @@ class ExclusionReason(StrEnum):
     # 以下は SIC と提出フォームを取ってから付ける。
     FINANCIAL_SIC = "financial_sic"
     NO_10K = "no_10k"
+    # submissions に現れなかった銘柄。SIC も 10-K の有無も判定できない。
+    NO_SUBMISSIONS = "no_submissions"
 
 
 @dataclass(frozen=True, slots=True)

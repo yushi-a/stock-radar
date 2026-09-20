@@ -1,0 +1,166 @@
+{
+ "CIK0000320193.json": {
+  "cik": "0000320193",
+  "name": "Apple Inc.",
+  "sic": "3571",
+  "sicDescription": "Electronic Computers",
+  "entityType": "operating",
+  "filings": {
+   "recent": {
+    "form": [
+     "4",
+     "3",
+     "8-K/A",
+     "144",
+     "10-Q",
+     "SD",
+     "SCHEDULE 13G",
+     "PX14A6G",
+     "DEFA14A",
+     "DEF 14A",
+     "25-NSE",
+     "10-K"
+    ]
+   }
+  },
+  "_label": "operating_10k"
+ },
+ "CIK0000009631.json": {
+  "cik": "0000009631",
+  "name": "BANK OF NOVA SCOTIA",
+  "sic": "6022",
+  "sicDescription": "State Commercial Banks",
+  "entityType": "operating",
+  "filings": {
+   "recent": {
+    "form": [
+     "424B2",
+     "FWP",
+     "424B3",
+     "F-N",
+     "F-3",
+     "6-K",
+     "N-PX",
+     "13F-HR",
+     "EFFECT",
+     "F-4/A",
+     "SCHEDULE 13G/A",
+     "4"
+    ]
+   }
+  },
+  "_label": "bank"
+ },
+ "CIK0000766704.json": {
+  "cik": "0000766704",
+  "name": "WELLTOWER INC.",
+  "sic": "6798",
+  "sicDescription": "Real Estate Investment Trusts",
+  "entityType": "operating",
+  "filings": {
+   "recent": {
+    "form": [
+     "4",
+     "SCHEDULE 13G/A",
+     "8-K",
+     "424B7",
+     "424B5",
+     "10-Q",
+     "FWP",
+     "ARS",
+     "DEFA14A",
+     "DEF 14A",
+     "10-K",
+     "UPLOAD"
+    ]
+   }
+  },
+  "_label": "reit"
+ },
+ "CIK0002040475.json": {
+  "cik": "0002040475",
+  "name": "Drugs Made In America Acquisition II Corp.",
+  "sic": "6770",
+  "sicDescription": "Blank Checks",
+  "entityType": "operating",
+  "filings": {
+   "recent": {
+    "form": [
+     "10-Q",
+     "8-K",
+     "10-K",
+     "NT 10-K",
+     "NT 10-Q",
+     "4",
+     "SCHEDULE 13D",
+     "3",
+     "424B4",
+     "EFFECT",
+     "CERT",
+     "8-A12B"
+    ]
+   }
+  },
+  "_label": "spac"
+ },
+ "CIK0000937966.json": {
+  "cik": "0000937966",
+  "name": "ASML HOLDING NV",
+  "sic": "3559",
+  "sicDescription": "Special Industry Machinery, NEC",
+  "entityType": "other",
+  "filings": {
+   "recent": {
+    "form": [
+     "6-K",
+     "SD",
+     "20-F",
+     "S-8",
+     "S-8 POS",
+     "SCHEDULE 13G/A",
+     "CT ORDER",
+     "SC 13G/A",
+     "UPLOAD",
+     "CORRESP",
+     "8-A12B/A",
+     "424B3"
+    ]
+   }
+  },
+  "_label": "adr_20f"
+ },
+ "CIK0001510599.json": {
+  "cik": "0001510599",
+  "name": "PIMCO Dynamic Income Fund",
+  "sic": "",
+  "sicDescription": "",
+  "entityType": "other",
+  "filings": {
+   "recent": {
+    "form": [
+     "N-CEN",
+     "N-CSR",
+     "NPORT-P",
+     "N-PX",
+     "40-17G",
+     "3/A",
+     "4",
+     "DEF 14A",
+     "40-APP/A",
+     "N-CSRS",
+     "424B5",
+     "8-K"
+    ]
+   }
+  },
+  "_label": "closed_end_fund"
+ },
+ "CIK0000320193-submissions-001.json": {
+  "form": [
+   "10-K",
+   "4",
+   "8-K"
+  ],
+  "_label": "shard"
+ }
+}
