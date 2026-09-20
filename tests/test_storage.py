@@ -32,14 +32,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CRITERIA_PATH = REPO_ROOT / "config" / "criteria.yaml"
 
 
-@pytest.fixture
-def con() -> duckdb.DuckDBPyConnection:
-    connection = connect(":memory:")
-    apply_schema(connection)
-    yield connection
-    connection.close()
-
-
 def _table_names(con: duckdb.DuckDBPyConnection) -> set[str]:
     rows = con.execute(
         "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
@@ -245,3 +237,46 @@ def test_passed_filters_round_trips_as_a_list(con: duckdb.DuckDBPyConnection) ->
     )
     stored = con.execute("SELECT passed_filters FROM screen_results").fetchone()[0]
     assert stored == ["revenue_cagr_3y", "op_margin"]
+
+
+# --- 時刻の扱い -------------------------------------------------------------
+
+
+def test_timestamps_round_trip_without_pytz(con: duckdb.DuckDBPyConnection) -> None:
+    """TIMESTAMP 列を Python に読み戻せること。
+
+    TIMESTAMPTZ だと DuckDB が pytz を要求して落ちる。依存を増やさないために
+    tz 無しの TIMESTAMP に UTC を入れる方針にしてある。
+    """
+    from stock_radar.storage import utc_now
+
+    stamp = utc_now()
+    con.execute(
+        "INSERT INTO universe (market, ticker, updated_at) VALUES ('us', 'AAPL', ?)", [stamp]
+    )
+    assert con.execute("SELECT updated_at FROM universe").fetchone()[0] == stamp
+
+
+def test_utc_now_is_naive() -> None:
+    from stock_radar.storage import utc_now
+
+    assert utc_now().tzinfo is None
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        # JST 21:00 == UTC 12:00
+        (
+            dt.datetime(2026, 9, 20, 21, 0, tzinfo=dt.timezone(dt.timedelta(hours=9))),
+            dt.datetime(2026, 9, 20, 12, 0),
+        ),
+        (dt.datetime(2026, 9, 20, 12, 0, tzinfo=dt.UTC), dt.datetime(2026, 9, 20, 12, 0)),
+        # naive はすでに UTC として扱う。
+        (dt.datetime(2026, 9, 20, 12, 0), dt.datetime(2026, 9, 20, 12, 0)),
+    ],
+)
+def test_as_utc_naive(value: dt.datetime, expected: dt.datetime) -> None:
+    from stock_radar.storage import as_utc_naive
+
+    assert as_utc_naive(value) == expected
