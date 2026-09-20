@@ -44,7 +44,7 @@ DEFAULT_DB_PATH = Path("data/stock_radar.duckdb")
 # ずれることになるので、UTC の naive に統一して書く側で揃える。
 
 # スキーマを非互換に変えたら上げる。上げ忘れると古いファイルを黙って読むことになる。
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # zip や API から作り直せるテーブル。閾値やタグ優先順位を変えたときに捨てて再構築する。
 REBUILDABLE_TABLES = (
@@ -108,9 +108,13 @@ _DDL: tuple[str, ...] = (
     );
     """,
     # --- facts_annual -------------------------------------------------------
-    # companyfacts を縦持ちのまま入れる。同じ会計年度が複数回出る（元の10-K +
-    # 翌年の比較欄での再掲、修正再提出）ため accn までキーに含める。
-    # どのエントリを採るかは Phase 2a で決めて normalize.py で解決する。
+    # companyfacts を縦持ちのまま入れる。生の写しなので一意制約は付けない。
+    #
+    # SEC は同じ (cik, concept, unit, period_end, accn) を**2回報告することがある**
+    # （period_start だけが違う）。実測で年次104件・四半期61件あり、うち14件は値まで
+    # 食い違う。Coeur Mining の 2011年度は同じ10-K に 356日（2.4億ドル）と
+    # 365日（10.2億ドル）が併記されていて4倍違う。一意制約を付けると、
+    # この片方を黙って捨てることになる。どちらを採るかは normalize.py の責務。
     """
     CREATE TABLE IF NOT EXISTS facts_annual (
         cik          INTEGER NOT NULL,
@@ -123,29 +127,34 @@ _DDL: tuple[str, ...] = (
         value        DOUBLE,
         unit         VARCHAR NOT NULL,
         accn         VARCHAR NOT NULL,
-        filed_at     DATE,
-        PRIMARY KEY (cik, concept, unit, period_end, accn)
+        filed_at     DATE
     );
     """,
+    "CREATE INDEX IF NOT EXISTS facts_annual_lookup ON facts_annual (cik, concept);",
     # --- facts_quarterly ----------------------------------------------------
     # 売上関連のみ。トラックB の「直近四半期 YoY」に要る。
-    # 多くの企業は YTD でしか報告しないため、fiscal_period を持って
-    # Q2 = YTD(Q2) - YTD(Q1) のような引き算をできるようにする（Phase 2a の B）。
+    # Phase 2a の実測で、3ヶ月値は 92.4% の企業が直接報告していると分かったため、
+    # ここには80〜100日のエントリだけを入れる。YTD の引き算は不要。
+    # facts_annual と同じ理由で一意制約は付けない。
     """
     CREATE TABLE IF NOT EXISTS facts_quarterly (
         cik           INTEGER NOT NULL,
         fiscal_year   INTEGER NOT NULL,
-        fiscal_period VARCHAR NOT NULL CHECK (fiscal_period IN ('Q1', 'Q2', 'Q3', 'Q4', 'FY')),
+        -- SEC が fp を付けていないエントリがあるので NULL を許す。
+        -- 四半期の選別は期間長で行うため、これが無くても困らない。
+        fiscal_period VARCHAR CHECK (
+            fiscal_period IS NULL OR fiscal_period IN ('Q1', 'Q2', 'Q3', 'Q4', 'FY')
+        ),
         period_start  DATE,
         period_end    DATE    NOT NULL,
         concept       VARCHAR NOT NULL,
         value         DOUBLE,
         unit          VARCHAR NOT NULL,
         accn          VARCHAR NOT NULL,
-        filed_at      DATE,
-        PRIMARY KEY (cik, concept, unit, period_end, accn)
+        filed_at      DATE
     );
     """,
+    "CREATE INDEX IF NOT EXISTS facts_quarterly_lookup ON facts_quarterly (cik, concept);",
     # --- fundamentals -------------------------------------------------------
     # 正規化後の横持ち。companyfacts.zip は最新1世代しか残さないので、
     # ここを失うと再ダウンロードが要る。
@@ -369,6 +378,43 @@ def drop_rebuildable(con: duckdb.DuckDBPyConnection) -> None:
     """
     for table in REBUILDABLE_TABLES:
         con.execute(f"DROP TABLE IF EXISTS {table}")
+
+
+def compact(path: Path | str = DEFAULT_DB_PATH) -> tuple[int, int]:
+    """DuckDB ファイルを作り直して縮める。元のサイズと後のサイズを返す。
+
+    DuckDB は DELETE しても解放ブロックをファイルに返さない。**VACUUM も
+    CHECKPOINT も効かないことを実測で確認した**（176MB のまま変わらない）。
+    一方、別ファイルへ `COPY FROM DATABASE` で書き直すと 176MB → 50MB になる。
+
+    `facts_annual` / `facts_quarterly` は週次で125万行を丸ごと入れ替えるため、
+    これをやらないと1回あたり約25MB 増え続ける。
+
+    書き上がるまで元のファイルには触らない。途中で落ちても壊れない。
+    """
+    path = Path(path)
+    before = path.stat().st_size
+    target = path.with_suffix(path.suffix + ".compact")
+    for leftover in (target, Path(str(target) + ".wal")):
+        leftover.unlink(missing_ok=True)
+
+    con = duckdb.connect(":memory:")
+    try:
+        con.execute(f"ATTACH '{path}' AS source (READ_ONLY)")
+        con.execute(f"ATTACH '{target}' AS target")
+        con.execute("COPY FROM DATABASE source TO target")
+        con.execute("DETACH target")
+        con.execute("DETACH source")
+    except duckdb.Error as exc:
+        target.unlink(missing_ok=True)
+        raise StorageError(f"DuckDB ファイルを作り直せない: {path} ({exc})") from exc
+    finally:
+        con.close()
+
+    # 元の WAL を残すと、入れ替えた本体と食い違う。
+    Path(str(path) + ".wal").unlink(missing_ok=True)
+    target.replace(path)
+    return before, path.stat().st_size
 
 
 @contextmanager
