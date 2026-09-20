@@ -14,7 +14,7 @@ Kill 条件監視・フィードバック記録・日本株対応は第一弾の
 ## Phase 0：足場
 
 - `uv init` / `pyproject.toml` / `uv.lock`
-- ruff + pytest + `.env.example`（`SEC_USER_AGENT` ほか。通知先の環境変数は `notificator` の仕様確認後）
+- ruff + pytest + `.env.example`（`SEC_USER_AGENT`, `NOTIFICATOR_ADDRESS`）
 - テスト中の外部アクセスを遮断する設定（`pytest-socket` 等）。方針は `docs/testing.md`
 - `storage.py`：DuckDB 接続とスキーマ定義
 - `config.py`：設定ファイルの読み込みと型付け
@@ -151,9 +151,11 @@ Phase 2a で決めたルールを実装する。
 
 - CSV：`output/2026-09-20_us.csv`
   列は `docs/skill-integration.md` のたたき台＋各指標のデータソースと基準日（決算期・取得日）
-- 通知：実行日、ユニバース件数、通過件数（トラック別）、上位銘柄、CSV パス
-  - 送信先は同一クラスタ内にデプロイ済みの自前アプリ `notificator`（CronJob 化後は Service 名で到達可能）
-  - **インターフェース（エンドポイント・ペイロード形式・認証）は未確認。実装時に確認する**
+- 通知：実行日、ユニバース件数、通過件数（トラック別）、`price_coverage`、上位数銘柄、CSV パス
+  - 送信先は `notificator`。**Connect プロトコルの JSON を `httpx` で POST する**（詳細は `docs/architecture.md`）。
+    `grpcio` や proto のコード生成は不要
+  - **バックエンドが LINE のため、送れるのは単一の文字列で実用上は数百文字。
+    候補リスト全体は送らず要約に絞る。CSV は PVC 上に置いてパスだけ載せる**
   - 通知は Phase 5 の最後に回す。CSV 出力までが動けば運用は始められるため、ここをブロッカーにしない
 - CLI：`stock-radar run --market us --criteria config/criteria.yaml --runtime config/runtime.yaml`
   フェーズ単位でも実行できるようにする（`fetch-universe` / `fetch-facts` / `fetch-prices` / `screen`）
@@ -187,6 +189,8 @@ Phase 2a で決めたルールを実装する。
 - `activeDeadlineSeconds` は時間予算 + 余裕、`backoffLimit` は低め
 - `criteria.yaml` / `runtime.yaml` は ConfigMap でマウントする
 - namespace は新規に切る想定。private イメージなら registry-secret も新 namespace に要る
+- **SOPS の secret は不要の見込み。** notificator に認証は無く、`SEC_USER_AGENT` は
+  SEC に開示する連絡先であって秘密ではない
 
 **検証**：`helm template` / `helm lint` と `helmfile diff` まで。
 
@@ -205,7 +209,7 @@ kubectl create job --from=cronjob/stock-radar stock-radar-manual-1 -n <ns>
 | 全銘柄での完走 | 丸1日走らせて最後まで行くか。429 の実挙動もここで分かる |
 | PVC の永続 | 2回目の実行が差分で走るか |
 | リソース実測 | メモリ・ディスクを測り、`resources` の limits を確定する |
-| notificator への通知 | gRPC で実際に届くか |
+| notificator への通知 | Connect の JSON POST が通り、LINE に届くか。`curl` 1回で確認できる |
 
 ## 第一弾より後
 
