@@ -54,7 +54,13 @@ Phase 2a（データ構造の実地調査）は、`companyfacts` の実データ
   - J-Quants: 取得データそのものの再配布、分析結果の継続的な第三者提供は禁止。データをリポジトリにコミットしない。
   - SEC: User-Agent に連絡先を入れる等、SEC の Developer FAQ に従う。一括取得は `companyfacts.zip` を使い、企業ごとの API を連打しない。
   - yfinance: 非公式・個人利用前提。レート制限（429）を前提にスロットリング・キャッシュ・リトライを入れる。
-- **シークレット（API キー）はコミットしない。** `.env` を使う。
+- **シークレットも連絡先もコミットしない。** `.env` を使う。
+  - **メールアドレスを絶対にファイルへ直書きしない。** SEC の User-Agent に入れる連絡先も含む。
+    秘密ではないが、公開リポジトリに残ると履歴から消せない。値は環境変数
+    `SEC_USER_AGENT` で外から渡す（`config.require_env()`）。
+    `config/*.yaml` が持つのは変数名（`sec.user_agent_env`）だけで、値は持たない。
+  - `tests/test_no_committed_contacts.py` が追跡ファイルを走査して CI で落とす。
+    プレースホルダは `example.com` 等（RFC 2606）のみ許可。
 
 ## 言語
 
