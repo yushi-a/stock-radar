@@ -9,8 +9,10 @@
 
 from __future__ import annotations
 
+import csv
 import datetime as dt
-from collections.abc import Iterator
+import tempfile
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -44,7 +46,7 @@ DEFAULT_DB_PATH = Path("data/stock_radar.duckdb")
 # ずれることになるので、UTC の naive に統一して書く側で揃える。
 
 # スキーマを非互換に変えたら上げる。上げ忘れると古いファイルを黙って読むことになる。
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # zip や API から作り直せるテーブル。閾値やタグ優先順位を変えたときに捨てて再構築する。
 REBUILDABLE_TABLES = (
@@ -186,7 +188,9 @@ _DDL: tuple[str, ...] = (
         filed_at            DATE,
         -- 指標ごとに採用した XBRL タグ。{"revenue": "Revenues", ...}
         source_concepts     JSON,
-        PRIMARY KEY (cik, fiscal_year)
+        -- 主キーは会計年度ではなく期末。決算期がずれると同じ暦年に2つの年度が
+        -- 並ぶことがある（BK Technologies は 2020-01-01 と 2020-12-31 の両方を持つ）。
+        PRIMARY KEY (cik, period_end)
     );
     """,
     # --- prices_daily -------------------------------------------------------
@@ -298,6 +302,77 @@ _DDL: tuple[str, ...] = (
     );
     """,
 )
+
+
+class _BulkTable:
+    """`bulk_writer` が返す1テーブル分の書き込み口。"""
+
+    def __init__(self, table: str, columns: Sequence[str], path: Path) -> None:
+        self.table = table
+        self.columns = columns
+        self.path = path
+        self.count = 0
+        self._handle = path.open("w", newline="", encoding="utf-8")
+        self._writer = csv.writer(self._handle)
+
+    def write(self, row: Sequence[object]) -> None:
+        self._writer.writerow(["" if value is None else value for value in row])
+        self.count += 1
+
+    def close(self) -> None:
+        self._handle.close()
+
+
+@contextmanager
+def bulk_writer(con: duckdb.DuckDBPyConnection) -> Iterator[Callable[..., _BulkTable]]:
+    """CSV に書き溜めて、抜けるときに COPY でまとめて入れる。
+
+    行単位の INSERT は DuckDB では極端に遅い（実測で20万行に240秒）。CSV に
+    書き出して COPY すると125万行が2.4秒で入る。列指向のストレージに1行ずつ
+    追記させないための回り道で、依存は増えない。
+
+    **行を溜めずに書き出す。** 125万行をリストに持つとピークメモリが 1.4GB に
+    なり、コンテナでは重すぎる。
+
+    ``None`` は空欄として書き、``NULLSTR ''`` で NULL に戻す。
+    """
+    tables: list[_BulkTable] = []
+    with tempfile.TemporaryDirectory(prefix="stock-radar-load-") as tmp:
+
+        def table(name: str, columns: Sequence[str]) -> _BulkTable:
+            created = _BulkTable(name, columns, Path(tmp) / f"{name}.csv")
+            tables.append(created)
+            return created
+
+        try:
+            yield table
+        finally:
+            for created in tables:
+                created.close()
+
+        for created in tables:
+            if created.count:
+                con.execute(
+                    f"COPY {created.table} ({', '.join(created.columns)}) FROM ? "
+                    "(FORMAT CSV, HEADER false, NULLSTR '', DATEFORMAT '%Y-%m-%d')",
+                    [str(created.path)],
+                )
+
+
+def bulk_insert(
+    con: duckdb.DuckDBPyConnection,
+    table: str,
+    columns: Sequence[str],
+    rows: Iterable[Sequence[object]],
+) -> int:
+    """1テーブルぶんをまとめて入れる。`bulk_writer` の薄い包み。"""
+    written = 0
+    with bulk_writer(con) as make:
+        sink = make(table, columns)
+        for row in rows:
+            sink.write(row)
+        written = sink.count
+    return written
 
 
 def utc_now() -> dt.datetime:
