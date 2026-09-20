@@ -1,0 +1,67 @@
+# 運用パラメータ。判定条件ではないので criteria.yaml とは分けてある。
+# 混ぜると「閾値を変えていないのに screen_runs.criteria_snapshot が変わる」状態になる。
+#
+# 初期値は保守的（間隔・予算ともに長め）に置いてある。429 の発生状況を Phase 3 で
+# 実測してから詰める。設計の根拠は docs/architecture.md の「株価取得の設計」。
+
+sec:
+  # SEC は User-Agent に連絡先を含めることを求めている（SEC Developer FAQ）。
+  # 実際の値は環境変数 SEC_USER_AGENT で渡す。ここには置かない。
+  user_agent_env: SEC_USER_AGENT
+  # companyfacts.zip は毎晩 ET 3:00 頃に再生成される。1ファイル1GB超あるため、
+  # 取得・パース後に古い世代を削除して最新1世代のみ保持する。
+  raw_dir: data/raw/sec
+  keep_generations: 1
+
+prices:
+  window_days: 315            # 取得ウィンドウ（52週 + 余裕）
+  overlap_days: 5             # 遡及調整（株式分割）の検知に使う重複日数
+
+  # 適応型スロットリング。429 から回復するのではなく、そもそも 429 を踏まない速度で回す。
+  # 2,000銘柄に24時間を割り当てれば1件あたり43秒まで許容できる。
+  throttle:
+    base_interval_sec: 3.0
+    jitter_sec: 2.0
+    min_interval_sec: 3.0
+    max_interval_sec: 120.0
+    # 429 を受けたら、そのリクエストだけリトライするのではなく全体の間隔を倍にする。
+    # Yahoo のレート制限は IP 単位で粘着的なため、1件だけ待って再開するとすぐまた踏む。
+    backoff_multiplier: 2.0
+    recovery_after_successes: 200
+    recovery_factor: 0.9
+
+  # 適応制御でも収まらない場合の段階的退避。IP 単位のペナルティは数時間で解ける
+  # 性質のものなので、短いリトライを繰り返すより長く待つ方が有効。
+  circuit_breaker:
+    consecutive_429_threshold: 5
+    pause_sec: [1800, 7200, 21600, 43200]   # 30分 → 2h → 6h → 12h
+
+  # 壁時計の予算。超過したら取得を打ち切り、その時点のデータで以降の工程を走らせる。
+  # 差分更新なので取れなかった分は次回の run に持ち越される。
+  budget:
+    max_wall_clock_sec: 72000        # 20時間。目安であり調整前提
+    on_exceeded: continue_next_run
+
+  retry:
+    max_attempts_per_run: 3
+    # 恒久的失敗（シンボル不正＝上場廃止・ティッカー変更の疑い）と判定するまでの連続回数。
+    permanent_error_threshold: 3
+
+  # 株価取得の成功率がこれを下回ったら通知に警告を出す。これが無いと
+  # 「今週は候補が5件しか出なかった」のが相場のせいなのか取得失敗のせいなのか判別できない。
+  coverage_warn_threshold: 0.90
+
+output:
+  csv_dir: output
+
+notify:
+  # 宛先は環境変数 NOTIFICATOR_ADDRESS で渡す。
+  address_env: NOTIFICATOR_ADDRESS
+  # Connect プロトコルの unary + JSON。grpcio も proto のコード生成も不要。
+  path: /yuxsr.notification.v1.NotificatorService/Notify
+  timeout_sec: 10
+  # バックエンドが LINE Bot の push message（5,000文字上限）のため、
+  # 候補リスト全体は送らず要約に絞る。CSV は PVC 上に置いてパスだけ載せる。
+  max_message_chars: 900
+  # 通知に載せる上位銘柄の数。
+  top_n: 5

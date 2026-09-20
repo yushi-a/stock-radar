@@ -18,7 +18,8 @@ Kill 条件監視・フィードバック記録・日本株対応は第一弾の
 - テスト中の外部アクセスを遮断する設定（`pytest-socket` 等）。方針は `docs/testing.md`
 - `storage.py`：DuckDB 接続とスキーマ定義
 - `config.py`：設定ファイルの読み込みと型付け
-  - `config/criteria.yaml`：スクリーニング閾値（`criteria.example.yaml` からコピーして使う）
+  - `config/criteria.yaml`：スクリーニング閾値。リポジトリにコミットする
+    （秘密値は含まず、K8s では ConfigMap でマウントするため実体が要る）
   - `config/runtime.yaml`：運用パラメータ（スロットリング、時間予算など）。`criteria.yaml` とは別ファイルにする
 
 ## Phase 1：ユニバース確定

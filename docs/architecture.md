@@ -53,7 +53,7 @@ yfinance の `marketCap` には依存せず、照合にのみ使う（「一次�
 ```
 src/stock_radar/
   cli.py                    エントリポイント
-  config.py                 criteria.yaml の読み込みと型付け
+  config.py                 criteria.yaml / runtime.yaml の読み込みと型付け
   storage.py                DuckDB 接続・スキーマ定義・マイグレーション
   sources/
     sec/
