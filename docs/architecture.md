@@ -86,7 +86,7 @@ src/stock_radar/
 | `universe` | market, ticker, cik, name, sic, exchange, form_type, `excluded_reason`, updated_at。主キー `(market, ticker)` | 再生成可 |
 | `facts_annual` | 縦持ち。cik, fiscal_year, `period_start`, period_end, concept, value, unit, accn, filed_at。**一意制約は付けない**（後述） | 再生成可（zip があれば） |
 | `facts_quarterly` | 同上 + `fiscal_period`（Q1〜Q4/FY、NULL 可）。売上関連のみ | 再生成可 |
-| `fundamentals` | 横持ち・正規化後。cik, fiscal_year, period_start/end, `period_days`, revenue, gross_profit, operating_income, net_income, total_assets, equity, `current_assets`, `current_liabilities`, cfo, capex, shares_outstanding, `currency`, accn, filed_at, `source_concepts`(JSON) | **必要** |
+| `fundamentals` | 横持ち・正規化後。**主キーは `(cik, period_end)`**（後述）。cik, fiscal_year, period_start/end, `period_days`, revenue, gross_profit, operating_income, net_income, total_assets, equity, `current_assets`, `current_liabilities`, cfo, capex, shares_outstanding, `currency`, accn, filed_at, `source_concepts`(JSON) | **必要** |
 | `prices_daily` | ticker, date, open, high, low, close, volume。主キー `(ticker, date)` | **必要**（差分追記） |
 | `fetch_failures` | ticker, `error_class`, attempt_count, last_attempt, last_error。リトライ用のキュー兼、再開時のスキップ判定 | **必要** |
 | `market_metrics` | ticker, as_of, market_cap, avg_daily_value, high_52w, low_52w, range_position_52w, drawdown_from_52w_high, `latest_price_date` | 再生成可 |
@@ -116,6 +116,15 @@ src/stock_radar/
 Python へ読み戻すのに `pytz` が要り、かつセッションのタイムゾーンで表示が変わるため、
 ローカル（JST）とコンテナ（UTC）で CSV の値がずれる。
 書く側は `storage.utc_now()` / `storage.as_utc_naive()` を通す。
+
+### `fundamentals` の主キーが会計年度でない理由
+
+決算期がずれると**同じ暦年に2つの年度が並ぶ**。BK Technologies は期末 2020-01-01（FY2019）と
+2020-12-31（FY2020）の両方を持つ。会計年度をキーにすると衝突するので、期末をキーにする。
+
+会計年度のラベルは「その年度が終わる暦年」。ただし期末が1月7日以前なら前年とみなす
+（12/31 から 1/1 に1日ずれただけで翌年度扱いになるのを避けるため）。
+Walmart（1月末決算）は 2024-01-31 → FY2024 で、会社自身の呼び方と一致する。
 
 ### 縦持ちテーブルに一意制約を付けない理由
 
@@ -373,6 +382,14 @@ prices:
 新しければ手元のものを使う。
 
 定常的に必要な容量は **6〜8GB 程度**（zip 2種を1世代ずつで約3GB + DuckDB + 展開の作業領域）。
+
+### 一括ロードは CSV 経由（`storage.bulk_writer()`）
+
+行単位の INSERT は DuckDB では極端に遅い。**実測で20万行に240秒**かかり、
+CSV に書き出して COPY すると **125万行が2.4秒**で入る。列指向のストレージに
+1行ずつ追記させないための回り道で、依存は増えない。
+
+**行を溜めずに書き出す。** 125万行をいったんリストに持つとピークメモリが 1.4GB になる。
 
 ### ファイルの作り直し（`storage.compact()`）
 

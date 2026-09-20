@@ -15,12 +15,10 @@
 
 from __future__ import annotations
 
-import csv
 import datetime as dt
 import json
 import logging
 import re
-import tempfile
 import zipfile
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
@@ -30,6 +28,7 @@ from typing import TYPE_CHECKING, Any
 from stock_radar.config import Market, SecRuntime
 from stock_radar.sources.sec import concepts
 from stock_radar.sources.sec.client import SecClient, SecError
+from stock_radar.storage import bulk_writer
 
 if TYPE_CHECKING:
     import duckdb
@@ -263,13 +262,28 @@ def download_companyfacts(
 
 # --- DuckDB への書き込み ----------------------------------------------------
 
-# 行単位の INSERT は DuckDB では極端に遅い（実測で20万行に240秒）。
-# CSV に書き出して COPY すると 125万行が2.4秒で入る。列指向のストレージに
-# 1行ずつ追記させないための回り道で、依存も増えない。
-_ANNUAL_COLUMNS = "cik, fiscal_year, period_start, period_end, concept, value, unit, accn, filed_at"
+_ANNUAL_COLUMNS = (
+    "cik",
+    "fiscal_year",
+    "period_start",
+    "period_end",
+    "concept",
+    "value",
+    "unit",
+    "accn",
+    "filed_at",
+)
 _QUARTERLY_COLUMNS = (
-    "cik, fiscal_year, fiscal_period, period_start, period_end, concept, value, unit, "
-    "accn, filed_at"
+    "cik",
+    "fiscal_year",
+    "fiscal_period",
+    "period_start",
+    "period_end",
+    "concept",
+    "value",
+    "unit",
+    "accn",
+    "filed_at",
 )
 
 
@@ -287,13 +301,13 @@ def _annual_row(fact: Fact) -> tuple:
     return (
         fact.cik,
         fact.fiscal_year,
-        fact.period_start or "",
+        fact.period_start,
         fact.period_end,
         fact.concept,
-        "" if fact.value is None else fact.value,
+        fact.value,
         fact.unit,
         fact.accn,
-        fact.filed_at or "",
+        fact.filed_at,
     )
 
 
@@ -301,14 +315,14 @@ def _quarterly_row(fact: Fact) -> tuple:
     return (
         fact.cik,
         fact.fiscal_year,
-        fact.fiscal_period or "",
-        fact.period_start or "",
+        fact.fiscal_period,
+        fact.period_start,
         fact.period_end,
         fact.concept,
-        "" if fact.value is None else fact.value,
+        fact.value,
         fact.unit,
         fact.accn,
-        fact.filed_at or "",
+        fact.filed_at,
     )
 
 
@@ -322,48 +336,29 @@ def store_facts(
 
     `facts_annual` / `facts_quarterly` は再生成可なので差分更新にしない。
     ユニバースから外れた企業の行も一緒に落ちる。
+
+    zip を読みながらそのまま書き出す。125万行をリストに持つとピークメモリが
+    1.4GB になり、コンテナでは重すぎる。
     """
     keep = wanted_ciks(con, market=market)
-    annual_total = quarterly_total = 0
 
-    with tempfile.TemporaryDirectory(prefix="stock-radar-facts-") as tmp:
-        annual_path = Path(tmp) / "facts_annual.csv"
-        quarterly_path = Path(tmp) / "facts_quarterly.csv"
-        with (
-            annual_path.open("w", newline="", encoding="utf-8") as annual_file,
-            quarterly_path.open("w", newline="", encoding="utf-8") as quarterly_file,
-        ):
-            annual_writer = csv.writer(annual_file)
-            quarterly_writer = csv.writer(quarterly_file)
+    con.execute("BEGIN TRANSACTION")
+    try:
+        con.execute("DELETE FROM facts_annual")
+        con.execute("DELETE FROM facts_quarterly")
+        with bulk_writer(con) as make:
+            annual_sink = make("facts_annual", _ANNUAL_COLUMNS)
+            quarterly_sink = make("facts_quarterly", _QUARTERLY_COLUMNS)
             for annual, quarterly in batches:
                 for fact in annual:
                     if fact.cik in keep:
-                        annual_writer.writerow(_annual_row(fact))
-                        annual_total += 1
+                        annual_sink.write(_annual_row(fact))
                 for fact in quarterly:
                     if fact.cik in keep:
-                        quarterly_writer.writerow(_quarterly_row(fact))
-                        quarterly_total += 1
-
-        con.execute("BEGIN TRANSACTION")
-        try:
-            con.execute("DELETE FROM facts_annual")
-            con.execute("DELETE FROM facts_quarterly")
-            _copy(con, "facts_annual", _ANNUAL_COLUMNS, annual_path)
-            _copy(con, "facts_quarterly", _QUARTERLY_COLUMNS, quarterly_path)
-        except Exception:
-            con.execute("ROLLBACK")
-            raise
-        con.execute("COMMIT")
-
-    return annual_total, quarterly_total
-
-
-def _copy(con: duckdb.DuckDBPyConnection, table: str, columns: str, path: Path) -> None:
-    if path.stat().st_size == 0:
-        return
-    con.execute(
-        f"COPY {table} ({columns}) FROM ? "
-        "(FORMAT CSV, HEADER false, NULLSTR '', DATEFORMAT '%Y-%m-%d')",
-        [str(path)],
-    )
+                        quarterly_sink.write(_quarterly_row(fact))
+            totals = (annual_sink.count, quarterly_sink.count)
+    except Exception:
+        con.execute("ROLLBACK")
+        raise
+    con.execute("COMMIT")
+    return totals
