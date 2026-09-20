@@ -212,6 +212,10 @@ class SecRuntime(_Model):
     raw_dir: Path
     # companyfacts.zip は1ファイル1GB超。週次で世代を残すと年50GBを超える。
     keep_generations: int = Field(ge=1)
+    # SEC の fair access は 10 リクエスト/秒。余裕を見てそれを下回る間隔で回す。
+    min_request_interval_sec: float = Field(gt=0)
+    max_attempts: int = Field(ge=1)
+    retry_backoff_sec: float = Field(ge=0)
 
 
 class ThrottleRuntime(_Model):
