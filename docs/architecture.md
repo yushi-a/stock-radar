@@ -342,9 +342,8 @@ environments/secrets/<name>.yaml         SOPS(age) で暗号化した秘密値
 
 既存の `stock-notificator`（CronJob）が最も近い前例なので、チャートはこれに倣う。
 
-- **通知先 `notificator` は gRPC**。`notificator.notification.svc.cluster.local:50051`、
-  環境変数 `NOTIFICATOR_ADDRESS` で渡す。HTTP ではない点に注意。
-  サービス定義（proto）は `yushi-a/yuxsr-dev-pb` にあると見られる（未確認）
+- **通知先 `notificator`** は `notificator.notification.svc.cluster.local:50051`、
+  環境変数 `NOTIFICATOR_ADDRESS` で渡す。詳細は後述の「通知の設計」
 - **Istio サイドカーの終了処理が必須。** Pod には `sidecar.istio.io/inject: "true"` が付くため、
   本体プロセスが終わってもサイドカーが残り **Job が完了しない**。既存の `stock-notificator` は
   コマンドの末尾で `curl -X POST http://localhost:15020/quitquitquit` を呼んで明示的に落としている。
@@ -359,6 +358,62 @@ environments/secrets/<name>.yaml         SOPS(age) で暗号化した秘密値
   `activeDeadlineSeconds` は時間予算 + 余裕、`backoffLimit` は低め（リトライはアプリ側の責務）、
   `restartPolicy: OnFailure` で再起動しても続きから走る。
 - **ノードのディスク空き容量は未確認**。定常3〜5GB を前提に、local PVC を切る前に確認する。
+
+## 通知の設計（notificator）
+
+`yushi-a/yuxsr-dev-pb` と `yushi-a/notificator` を実地確認した結果。
+
+### インターフェース
+
+```proto
+package yuxsr.notification.v1;
+
+service NotificatorService {
+  rpc Notify(NotifyRequest) returns (NotifyResponse);
+}
+message NotifyRequest { string message = 1; }
+message NotifyResponse {}
+```
+
+サーバは **Connect-go のハンドラ**を h2c で `:50051` に立てている
+（`notificationv1connect.NewNotificatorServiceHandler`）。
+Connect / gRPC / gRPC-Web を同一ポートで受けるため、**gRPC で話す必要がない。**
+
+### Python からは素の HTTP POST で叩く
+
+```
+POST http://notificator.notification.svc.cluster.local:50051/yuxsr.notification.v1.NotificatorService/Notify
+Content-Type: application/json
+
+{"message": "..."}
+```
+
+Connect プロトコルの unary + JSON は HTTP/1.1 の普通の POST なので、`httpx` だけで完結する。
+**`grpcio` / `protobuf` への依存も、proto からのコード生成も、proto のベンダリングも不要。**
+`yuxsr-dev-pb` は Go と TypeScript しか生成しておらず、Python 向けの生成物は無いため、
+gRPC で話そうとすると自前でコード生成基盤を持つことになる。それを避けられる。
+
+**未検証**：実際の疎通は確認していない（クラスタに到達できないため）。
+`curl` 1回で済むので Phase 6-4 の確認項目に入れている。
+
+### 送れるのは単一の文字列だけ
+
+`NotifyRequest` のフィールドは `message`（string）のみ。構造化されたフィールドは無い。
+通知内容はすべて1つの文字列に組み立てる。
+
+### バックエンドは LINE
+
+notificator は受け取ったメッセージを LINE Bot の push message として送る。ここから制約が来る。
+
+- **LINE のテキストメッセージは5,000文字が上限。** 実用上は数百文字に収める
+- **候補リスト全体は送れない。** 送るのは要約に限る（実行日、ユニバース件数、
+  トラック別の通過件数、`price_coverage`、上位数銘柄、CSV のパス）
+- **CSV の添付はこの経路ではできない。** CSV は PVC 上に置き、通知にはパスだけ載せる
+
+### 認証は不要の見込み
+
+proto にも notificator の実装にも認証の要素が無く、クラスタ内通信のため。
+**SOPS の secret は不要になる可能性が高い**（Phase 6 で確定させる）。
 
 ## SEC アクセスの作法
 
