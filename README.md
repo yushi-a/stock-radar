@@ -17,6 +17,7 @@
 | [CLAUDE.md](CLAUDE.md) | Claude Code 向けの作業指示・前提・禁止事項 |
 | [docs/architecture.md](docs/architecture.md) | システム構成・パイプライン・DuckDB スキーマ・技術選定の根拠 |
 | [docs/implementation-plan.md](docs/implementation-plan.md) | フェーズ分けした実装計画と各フェーズの検証項目 |
+| [docs/testing.md](docs/testing.md) | テスト方針。何を自動テストにし、何を手動確認に留めるか |
 | [docs/screening-criteria.md](docs/screening-criteria.md) | スクリーニング条件（根拠となる実証研究と閾値、米国版の読み替え） |
 | [docs/data-sources.md](docs/data-sources.md) | 証券会社スクリーナー／API の調査結果 |
 | [docs/skill-integration.md](docs/skill-integration.md) | 評価スキルとの役割分担・連携方針 |

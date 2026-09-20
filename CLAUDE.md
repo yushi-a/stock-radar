@@ -20,6 +20,7 @@ Phase 2a（データ構造の実地調査）は、`companyfacts` の実データ
 
 - `docs/architecture.md` — システム構成。パイプラインの処理順、DuckDB スキーマ、技術選定の根拠
 - `docs/implementation-plan.md` — フェーズ分けした実装計画と各フェーズの検証項目
+- `docs/testing.md` — テスト方針。何を自動テストにし、何を手動確認に留めるか
 - `docs/screening-criteria.md` — 条件と閾値、およびその根拠（米国版の読み替えを含む）
 - `docs/skill-integration.md` — スクリーナーが「やらないこと」
 - `docs/open-questions.md` — 未決事項。ここにある項目は独断で決めず、ユーザーに確認する
