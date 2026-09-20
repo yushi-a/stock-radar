@@ -33,7 +33,10 @@ Phase 2a（データ構造の実地調査）は、`companyfacts` の実データ
   - まずローカル CLI で育て、安定後に K3s CronJob（クラスタ `yuxsr-dev` / ノード `pollux`）。
   - 出力は CSV + 通知（同一クラスタ内の自前アプリ `notificator`）。
 - **パイプラインの処理順を崩さない。** 株価取得（yfinance）は必ず財務による足切りの後に実行する。先に対象を半減させることが 429 対策の中核になっている。
-- **第一弾のスコープを広げない。** スクリーニング + CSV + 通知まで。Kill 条件監視・フィードバック記録・CronJob 化・日本株対応は後回しと合意済み。
+- **第一弾のスコープを広げない。** スクリーニング + CSV + 通知 + デプロイ（Phase 6）まで。Kill 条件監視・フィードバック記録・日本株対応は後回しと合意済み。
+- **マニフェストは別リポジトリ。** K8s 関連は `yushi-a/helm`（Helmfile + Helm + SOPS）で管理する。既存の `stock-notificator` チャートが最も近い前例。
+- **通知先 `notificator` は gRPC**（`notificator.notification.svc.cluster.local:50051`）。HTTP ではない。
+- **Istio サイドカーの終了処理を忘れない。** CronJob の command 末尾で `curl -X POST http://localhost:15020/quitquitquit` を呼ばないと Job が完了しない。
 - **一次情報優先。** 財務値は日本 = J-Quants、米国 = SEC EDGAR XBRL を正とする。yfinance / FMP の値は株価補完と照合用。
 - **スクリーナーで投資判断をしない。** 期待倍率・スコア・目標株価を算出しない。割安度は PBR / FCF 利回り / PSR 等の粗い指標まで。
 - **閾値はコードに直書きしない。** `config/` の YAML で管理し、根拠（研究・見解）をコメントで残す。

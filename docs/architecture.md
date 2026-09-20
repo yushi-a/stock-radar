@@ -327,8 +327,33 @@ prices:
 - **バックアップはノード障害に対して無防備**。local PVC はレプリケーションされない。
   `fundamentals` / `prices_daily` / `screen_results` は再取得に時間がかかる（特に株価の履歴）ため、
   CronJob 化のタイミングで DuckDB ファイルの退避方法を決める。
-- **通知の到達経路**。`notificator` は同一クラスタ内で動いているため、
-  Service 名（ClusterIP）で直接叩ける。Ingress を経由する必要はない。
+### クラスタの流儀（`yushi-a/helm` リポジトリを実地確認）
+
+マニフェストは **`yushi-a/helm`（別リポジトリ）** で管理されている。Helmfile + Helm + SOPS。
+
+```
+charts/<name>/                      アプリごとの Helm チャート
+<name>.yaml                         Helmfile のリリース定義
+environments/values/<name>.yaml.gotmpl   値
+environments/secrets/<name>.yaml         SOPS(age) で暗号化した秘密値
+```
+
+デプロイは `helmfile -f <name>.yaml diff` → `apply`。
+
+既存の `stock-notificator`（CronJob）が最も近い前例なので、チャートはこれに倣う。
+
+- **通知先 `notificator` は gRPC**。`notificator.notification.svc.cluster.local:50051`、
+  環境変数 `NOTIFICATOR_ADDRESS` で渡す。HTTP ではない点に注意。
+  サービス定義（proto）は `yushi-a/yuxsr-dev-pb` にあると見られる（未確認）
+- **Istio サイドカーの終了処理が必須。** Pod には `sidecar.istio.io/inject: "true"` が付くため、
+  本体プロセスが終わってもサイドカーが残り **Job が完了しない**。既存の `stock-notificator` は
+  コマンドの末尾で `curl -X POST http://localhost:15020/quitquitquit` を呼んで明示的に落としている。
+  丸1日走る本ジョブでは特に致命的なので、同じ形にする
+- **ノード固定は `affinity.nodeAffinity` で hostname 指定する前例がある**（`notificator` が `low-instance-1`）。
+  local PVC で `pollux` に固定する際もこれに倣う
+- イメージは GHCR を使う（`ghcr.io/yushi-a/notificator` に実績あり）。
+  パッケージが private の場合は対象 namespace に registry-secret が要る
+- **既存チャートに PVC を使うものは無い。** local-path PVC は本アプリが初めてになる
 - **CronJob には `concurrencyPolicy: Forbid` を設定する**。DuckDB は1プロセスしか書き込みモードで
   ファイルを開けない。③は丸1日かかりうるため、前回の実行が終わる前に次が起動する事態は現実的なリスク。
   `activeDeadlineSeconds` は時間予算 + 余裕、`backoffLimit` は低め（リトライはアプリ側の責務）、

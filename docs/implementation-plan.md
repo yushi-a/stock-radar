@@ -1,8 +1,9 @@
 # 実装計画（米国株・第一弾）
 
-第一弾のゴール：**手元で `stock-radar run --market us` を叩くと、候補 CSV が出て notificator に通知が飛ぶ。**
+第一弾のゴール：**`yuxsr-dev` クラスタ上で週次 CronJob が回り、候補 CSV が出て notificator に通知が飛ぶ。**
 
-Kill 条件監視・フィードバック記録・K3s CronJob 化・日本株対応は第一弾のスコープ外（合意済み）。
+Kill 条件監視・フィードバック記録・日本株対応は第一弾のスコープ外（合意済み）。
+コンテナ化とデプロイ（Phase 6）は当初スコープ外だったが、2026-09-20 に第一弾へ含めることをユーザーが決定した。
 
 各フェーズに検証項目を置く。ここを飛ばすと、誤った財務値の上に条件を積んでしまい、
 出てきた候補が正しいのかどうか判断できなくなる。
@@ -158,23 +159,66 @@ Phase 2a で決めたルールを実装する。
   フェーズ単位でも実行できるようにする（`fetch-universe` / `fetch-facts` / `fetch-prices` / `screen`）
 - `companyfacts.zip` はパース後に古い世代を削除する（最新1世代のみ保持）
 
+## Phase 6：コンテナ化とデプロイ
+
+マニフェストは **`yushi-a/helm`（別リポジトリ）** に置く。既存の `stock-notificator` チャートが最も近い前例。
+クラスタの流儀は `docs/architecture.md` の「クラスタの流儀」を参照。
+
+### 6-1. Dockerfile（本リポジトリ）
+
+- uv ベースのマルチステージビルド、非 root 実行
+- ローカルでビルドして `stock-radar --help` が動くところまで確認
+
+### 6-2. GHCR への push（本リポジトリ）
+
+- GitHub Actions で main への push 時にビルドして `ghcr.io/yushi-a/stock-radar` へ
+- タグは git SHA と semver。`GITHUB_TOKEN` で認証できるため追加のシークレットは不要
+
+### 6-3. Helm チャート（helm リポジトリ）
+
+`charts/stock-radar/` を `stock-notificator` に倣って作る。差分は以下。
+
+- **PVC（local-path）を追加する。** 既存チャートに前例が無いので新規に書く。
+  DuckDB ファイルと `data/raw/` を置く。容量は 10GB 程度（`docs/architecture.md` の見積もり）
+- **`affinity.nodeAffinity` で `pollux` に固定する**（local PVC はノードローカルのため）
+- **Istio サイドカーの終了処理**を command の末尾に入れる。
+  これが無いと本体が終わっても Job が完了しない
+- `concurrencyPolicy: Forbid`（`stock-notificator` のテンプレートでは既定で入っている）
+- `activeDeadlineSeconds` は時間予算 + 余裕、`backoffLimit` は低め
+- `criteria.yaml` / `runtime.yaml` は ConfigMap でマウントする
+- namespace は新規に切る想定。private イメージなら registry-secret も新 namespace に要る
+
+**検証**：`helm template` / `helm lint` と `helmfile diff` まで。
+
+### 6-4. デプロイと実環境での動作確認 🔴 ゲート
+
+`helmfile -f stock-radar.yaml diff` → `apply` の後、手動トリガーで確認する。
+
+```bash
+kubectl create job --from=cronjob/stock-radar stock-radar-manual-1 -n <ns>
+```
+
+| 確認項目 | 見るもの |
+|---|---|
+| 少数銘柄での疎通 | `--limit 10` 相当で一周する |
+| **Job が Complete になる** | Istio サイドカーが落ちているか。ここが最も踏みやすい |
+| 全銘柄での完走 | 丸1日走らせて最後まで行くか。429 の実挙動もここで分かる |
+| PVC の永続 | 2回目の実行が差分で走るか |
+| リソース実測 | メモリ・ディスクを測り、`resources` の limits を確定する |
+| notificator への通知 | gRPC で実際に届くか |
+
 ## 第一弾より後
 
-1. K3s CronJob 化（実行時刻をここで決定。推奨は土曜朝 JST）
-   - local PVC を使う場合、Pod は `pollux` ノードに固定される（`docs/architecture.md` 参照）
-   - **`concurrencyPolicy: Forbid` を設定する**（DuckDB は同時書き込み不可。Phase 3 が丸1日かかりうるため重複起動は現実的なリスク）
-   - `activeDeadlineSeconds` は時間予算 + 余裕。`backoffLimit` は低め（リトライはアプリ側の責務）、
-     `restartPolicy: OnFailure` で再起動しても続きから走る
-   - DuckDB ファイルのバックアップ方法もここで決める（書き込み中のコピーは壊れるため、ジョブ実行時間外に取る）
-2. 前週差分・Kill 条件監視（`screen_results` の履歴を使う）
-3. 日本株対応（J-Quants。プラン選定を再検討する）
-4. 評価スキルへの CSV 入口の追加、フィードバック記録
+1. 前週差分・Kill 条件監視（`screen_results` の履歴を使う）
+2. 日本株対応（J-Quants。プラン選定を再検討する）
+3. 評価スキルへの CSV 入口の追加、フィードバック記録
+4. DuckDB ファイルのバックアップ（書き込み中のコピーは壊れるため、ジョブ実行時間外に取る）
 
 ## 依存関係
 
 ```
-Phase 0 ─→ Phase 1 ─→ Phase 2a ─→ Phase 2b ─→ Phase 3 ─→ Phase 4 ─→ Phase 5
-                      （調査）     （実装）
+Phase 0 ─→ Phase 1 ─→ Phase 2a ─→ Phase 2b ─→ Phase 3 ─→ Phase 4 ─→ Phase 5 ─→ Phase 6
+                      （調査）     （実装）                                      （デプロイ）
                          └──────────┘
                          ここが山（XBRL 正規化）
 ```
