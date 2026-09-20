@@ -84,8 +84,8 @@ src/stock_radar/
 | テーブル | 役割 | 永続 |
 |---|---|---|
 | `universe` | market, ticker, cik, name, sic, exchange, form_type, `excluded_reason`, updated_at。主キー `(market, ticker)` | 再生成可 |
-| `facts_annual` | 縦持ち。cik, fiscal_year, `period_start`, period_end, concept, value, unit, accn, filed_at | 再生成可（zip があれば） |
-| `facts_quarterly` | 同上 + `fiscal_period`（Q1〜Q4/FY）。売上関連のみ | 再生成可 |
+| `facts_annual` | 縦持ち。cik, fiscal_year, `period_start`, period_end, concept, value, unit, accn, filed_at。**一意制約は付けない**（後述） | 再生成可（zip があれば） |
+| `facts_quarterly` | 同上 + `fiscal_period`（Q1〜Q4/FY、NULL 可）。売上関連のみ | 再生成可 |
 | `fundamentals` | 横持ち・正規化後。cik, fiscal_year, period_start/end, `period_days`, revenue, gross_profit, operating_income, net_income, total_assets, equity, `current_assets`, `current_liabilities`, cfo, capex, shares_outstanding, `currency`, accn, filed_at, `source_concepts`(JSON) | **必要** |
 | `prices_daily` | ticker, date, open, high, low, close, volume。主キー `(ticker, date)` | **必要**（差分追記） |
 | `fetch_failures` | ticker, `error_class`, attempt_count, last_attempt, last_error。リトライ用のキュー兼、再開時のスキップ判定 | **必要** |
@@ -116,6 +116,22 @@ src/stock_radar/
 Python へ読み戻すのに `pytz` が要り、かつセッションのタイムゾーンで表示が変わるため、
 ローカル（JST）とコンテナ（UTC）で CSV の値がずれる。
 書く側は `storage.utc_now()` / `storage.as_utc_naive()` を通す。
+
+### 縦持ちテーブルに一意制約を付けない理由
+
+`facts_annual` / `facts_quarterly` は SEC の生の写しで、主キーを持たない。
+
+**SEC は同じ `(cik, concept, unit, period_end, accn)` を2回報告することがある。**
+違うのは `period_start` だけで、実測で年次104件・四半期61件。**うち14件は値まで食い違う。**
+
+```
+Coeur Mining 2011年度（同じ 10-K、同じ accn）
+  2011-01-01 .. 2011-12-31  365日  1,021,200,000
+  2011-01-10 .. 2011-12-31  356日    246,911,000   ← 4倍違う
+```
+
+どちらも 350〜380日のガードを通る。一意制約を付けると片方を黙って捨てることになり、
+売上を4分の1に取り違える。**どちらを採るかは `normalize.py` の責務**にする。
 
 ### スキーマの移行
 
@@ -333,14 +349,16 @@ prices:
 | テーブル | 行数 | 初期 | 年間増分 |
 |---|---|---|---|
 | `universe` | 約10,000（除外分含む） | 2MB | 0 |
-| `facts_annual` | 約68万行 | 15〜20MB | +2MB |
-| `facts_quarterly` | 約54万行 | 5〜10MB | +1MB |
+| `facts_annual` | **125万行**（2026-09-21 実測） | — | 入れ替えなので増えない |
+| `facts_quarterly` | **31万行**（同） | — | 同上 |
 | `fundamentals` | 4.5万行 | 10〜20MB | +2MB |
 | `prices_daily` | 約63万行 | 20〜25MB | +20MB |
 | `market_metrics` | 2,000行 | 1MB | 0 |
 | `screen_runs` / `screen_results` | 約1,500行/年 | — | +0.6MB |
 
-**DuckDB ファイルは差分追記でも10年で270MB程度**。制約にならない。
+`universe` + `facts_annual` + `facts_quarterly` を入れた実測は **51MB**（作り直し後）。
+株価が10年分積み上がっても数百MB のオーダーで、制約にはならない。
+**ただし作り直しを省くと週25MB ずつ増える**（前述）。
 
 容量を食うのは生の zip の方で、こちらは最新1世代のみ保持する（前述）。
 
@@ -356,8 +374,16 @@ prices:
 
 定常的に必要な容量は **6〜8GB 程度**（zip 2種を1世代ずつで約3GB + DuckDB + 展開の作業領域）。
 
-なお DuckDB は DELETE してもファイルが縮まない（解放ブロックは内部で再利用される）。
-分割検知によるフル再取得が多発した場合などにファイルが膨らんだら、`VACUUM` か再構築で縮める。
+### ファイルの作り直し（`storage.compact()`）
+
+DuckDB は DELETE した領域をファイルに返さない。**`VACUUM` も `CHECKPOINT` も効かないことを
+実測で確認した**（176MB のまま変わらない）。解放ブロックの再利用も十分には効かず、
+`facts_annual` / `facts_quarterly` を週次で丸ごと入れ替えると**1回あたり約25MB 増え続ける**。
+
+対策は別ファイルへの `COPY FROM DATABASE`。実測で **201MB → 51MB を1.1秒**で、
+データもスキーマバージョンもそのまま残る。`fetch-facts` の最後で必ず実行する。
+
+書き上がるまで元のファイルには触らないので、途中で落ちても壊れない。
 
 ## デプロイ先の前提（k8s）
 
