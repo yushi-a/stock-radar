@@ -75,22 +75,47 @@ src/stock_radar/
     notify.py               notificator への送信（インターフェースは実装時に確認）
 ```
 
-## DuckDB スキーマ（案）
+## DuckDB スキーマ
+
+**実体は `src/stock_radar/storage.py`。** 列の意図はそこのコメントに書いてある。
 
 | テーブル | 役割 | 永続 |
 |---|---|---|
-| `universe` | cik, ticker, name, sic, exchange, form_type, updated_at | 再生成可 |
-| `facts_annual` | 縦持ち。cik, fiscal_year, period_end, concept, value, unit, accn, filed_at | 再生成可（zip があれば） |
-| `facts_quarterly` | 同上。売上関連のみ | 再生成可 |
-| `fundamentals` | 横持ち・正規化後。revenue, operating_income, net_income, total_assets, equity, cfo, capex, gross_profit, shares_outstanding, `source_concepts`(JSON) | **必要** |
+| `universe` | market, ticker, cik, name, sic, exchange, form_type, `excluded_reason`, updated_at。主キー `(market, ticker)` | 再生成可 |
+| `facts_annual` | 縦持ち。cik, fiscal_year, `period_start`, period_end, concept, value, unit, accn, filed_at | 再生成可（zip があれば） |
+| `facts_quarterly` | 同上 + `fiscal_period`（Q1〜Q4/FY）。売上関連のみ | 再生成可 |
+| `fundamentals` | 横持ち・正規化後。cik, fiscal_year, period_start/end, `period_days`, revenue, gross_profit, operating_income, net_income, total_assets, equity, `current_assets`, `current_liabilities`, cfo, capex, shares_outstanding, `currency`, accn, filed_at, `source_concepts`(JSON) | **必要** |
 | `prices_daily` | ticker, date, open, high, low, close, volume。主キー `(ticker, date)` | **必要**（差分追記） |
 | `fetch_failures` | ticker, `error_class`, attempt_count, last_attempt, last_error。リトライ用のキュー兼、再開時のスキップ判定 | **必要** |
-| `market_metrics` | ticker, as_of, market_cap, avg_daily_value, high_52w, low_52w, range_position_52w, drawdown_from_52w_high | 再生成可 |
-| `screen_runs` | run_id, run_at, `criteria_snapshot`(JSON), universe_size, passed_count, `price_coverage` | **必要** |
-| `screen_results` | run_id, cik, ticker, track, passed_filters, timing_score, 各指標値, data_source, as_of | **必要** |
+| `market_metrics` | ticker, as_of, market_cap, avg_daily_value, high_52w, low_52w, range_position_52w, drawdown_from_52w_high, `latest_price_date` | 再生成可 |
+| `screen_runs` | run_id, run_at, market, `criteria_snapshot`(JSON), universe_size, passed_count, `price_coverage`, csv_path | **必要** |
+| `screen_results` | run_id, market, ticker, cik, name, track, passed_filters, timing_score, 各指標値（`criteria.yaml` の閾値と1対1）, 出典と基準日 | **必要** |
 
 `screen_runs.criteria_snapshot` に閾値そのものを保存する。
 これにより「この結果はどの閾値で出たか」を後から完全に再現でき、閾値調整の試行錯誤が記録として残る。
+
+### 設計時の表から増やした列とその理由
+
+- `universe.market` / `screen_runs.market` / `screen_results.market` —
+  条件が市場ごとに分かれており（`config/criteria.yaml`）、CSV の想定列にも `market` がある
+- `universe.excluded_reason` — Phase 1 の検証項目「除外理由別の件数も出す」に要る。
+  除外した銘柄も行として残し、`NULL` のものが残存ユニバースになる
+- `facts_annual.period_start` / `facts_quarterly.period_start` —
+  PL/CF は期間値、BS は時点値という区別と、`end - start` による決算期変更の検知（Phase 2a の A）に要る
+- `facts_quarterly.fiscal_period` — YTD → 3ヶ月変換（Phase 2a の B）に要る
+- `fundamentals.period_days` — 非12ヶ月の「年度」を 3年CAGR から外す判断に使う
+- `fundamentals.current_assets` / `current_liabilities` — トラックB の流動比率
+- `fundamentals.currency` — 「USD 建てで報告しない企業の扱い」（未決）を判断できるようにする
+- `market_metrics.latest_price_date` — 時間予算で打ち切ったときの鮮度フラグ
+
+### スキーマの移行
+
+`schema_meta` テーブルに `version` を持つ。**バージョンが合わないときは自動で作り直さず、落とす。**
+`prices_daily` のフル取得には丸1日かかり、`fundamentals` も元の `companyfacts.zip` を
+1世代しか残さないため、黙って捨ててよいテーブルではない。
+
+再生成可のテーブル（`universe` / `facts_annual` / `facts_quarterly` / `market_metrics`）だけは
+`drop_rebuildable()` で捨てて作り直せる。タグ優先順位や除外条件を変えたときに使う。
 
 生の `companyfacts.zip` は DuckDB には入れず `data/raw/sec/companyfacts_YYYY-MM-DD.zip` としてファイルで保持する。
 **保持は最新1世代のみ**とし、取得・パース後に古い世代を削除する。1ファイルが1GB超あり、
