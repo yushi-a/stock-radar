@@ -20,6 +20,9 @@ sec:
   # submissions.zip は 1.5GB。ユニバース（上場・SIC・提出フォーム）は週次では
   # ほとんど動かないので、毎回落とさない。
   submissions_max_age_days: 7
+  # companyfacts.zip は 1.4GB。SEC は毎晩 ET 3:00 頃に再生成するが、
+  # 週次バッチなので毎回落とす必要はない。
+  companyfacts_max_age_days: 6
 
 prices:
   window_days: 315            # 取得ウィンドウ（52週 + 余裕）

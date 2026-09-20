@@ -184,7 +184,7 @@ def test_facts_annual_keeps_both_filings_of_one_fiscal_year(
 ) -> None:
     """同じ年度が元の10-K と修正再提出で2回出ても、どちらも残ること。
 
-    どちらを採るかは Phase 2a で決める。ここで先に潰してしまうと判断できなくなる。
+    どちらを採るかは normalize.py の責務。ここで先に潰すと判断できなくなる。
     """
     for accn, value in (("0000-24-000001", 100.0), ("0000-25-000002", 105.0)):
         con.execute(
@@ -195,6 +195,26 @@ def test_facts_annual_keeps_both_filings_of_one_fiscal_year(
             [value, accn],
         )
     assert con.execute("SELECT count(*) FROM facts_annual").fetchone()[0] == 2
+
+
+def test_facts_annual_keeps_two_periods_that_share_an_end_and_filing(
+    con: duckdb.DuckDBPyConnection,
+) -> None:
+    """同じ提出書類が period_start 違いで2回報告してきても、両方残ること。
+
+    Coeur Mining の2011年度は同じ10-K に 356日（2.4億ドル）と 365日（10.2億ドル）が
+    併記されている。一意制約を付けると片方を黙って捨てることになる。
+    """
+    for start, value in (("2011-01-01", 1_021_200_000.0), ("2011-01-10", 246_911_000.0)):
+        con.execute(
+            "INSERT INTO facts_annual "
+            "(cik, fiscal_year, period_start, period_end, concept, value, unit, accn, filed_at) "
+            "VALUES (215466, 2011, ?, DATE '2011-12-31', 'SalesRevenueGoodsNet', ?, "
+            "'USD', '0001193125-12-075636', DATE '2012-02-23')",
+            [start, value],
+        )
+    values = {row[0] for row in con.execute("SELECT value FROM facts_annual").fetchall()}
+    assert values == {1_021_200_000.0, 246_911_000.0}
 
 
 # --- JSON / リスト列 --------------------------------------------------------
@@ -280,3 +300,59 @@ def test_as_utc_naive(value: dt.datetime, expected: dt.datetime) -> None:
     from stock_radar.storage import as_utc_naive
 
     assert as_utc_naive(value) == expected
+
+
+# --- ファイルの作り直し -----------------------------------------------------
+
+
+def test_compact_preserves_everything(tmp_path: Path) -> None:
+    """作り直してもデータとスキーマバージョンが残ること。"""
+    from stock_radar.storage import compact
+
+    path = tmp_path / "stock_radar.duckdb"
+    with open_database(path) as con:
+        con.execute(
+            "INSERT INTO prices_daily VALUES ('AAPL', DATE '2026-09-18', 1, 2, 0.5, 1.5, 9)"
+        )
+
+    compact(path)
+
+    with open_database(path) as con:
+        assert con.execute("SELECT volume FROM prices_daily").fetchone()[0] == 9
+        assert schema_version(con) == SCHEMA_VERSION
+        assert set(ALL_TABLES) <= _table_names(con)
+
+
+def test_compact_shrinks_after_a_bulk_replace(tmp_path: Path) -> None:
+    """DELETE だけではファイルが縮まないので、作り直しで回収できること。
+
+    DuckDB は解放ブロックをファイルに返さず、VACUUM も CHECKPOINT も効かない。
+    週次で 125万行を入れ替える facts テーブルではこれが効いてくる。
+    """
+    from stock_radar.storage import compact
+
+    path = tmp_path / "stock_radar.duckdb"
+    # 行単位の INSERT は DuckDB では遅いので SQL 側で作る。
+    fill = (
+        "INSERT INTO prices_daily "
+        "SELECT 'T' || i, DATE '2026-01-01', 1, 2, 0.5, 1.5, i FROM range(200000) t(i)"
+    )
+    with open_database(path) as con:
+        for _ in range(3):
+            con.execute("DELETE FROM prices_daily")
+            con.execute(fill)
+        con.execute("CHECKPOINT")
+
+    before, after = compact(path)
+    assert after < before
+
+    with open_database(path) as con:
+        assert con.execute("SELECT count(*) FROM prices_daily").fetchone()[0] == 200_000
+
+
+def test_compact_leaves_the_original_alone_on_failure(tmp_path: Path) -> None:
+    from stock_radar.storage import StorageError, compact
+
+    path = tmp_path / "missing.duckdb"
+    with pytest.raises((StorageError, OSError)):
+        compact(path)

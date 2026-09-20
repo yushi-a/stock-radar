@@ -31,10 +31,12 @@ uv run pytest                # テスト
 
 ```bash
 uv run stock-radar fetch-universe      # SEC からユニバースを取得して universe を作る
+uv run stock-radar fetch-facts         # companyfacts を取り込んで縦持ちテーブルを作る
 ```
 
-初回は `submissions.zip`（1.5GB）を落とすので数分かかる。2回目以降は
-`sec.submissions_max_age_days`（既定7日）より新しければ手元のものを使う。
+初回は `submissions.zip`（1.5GB）と `companyfacts.zip`（1.4GB）を落とすので数分かかる。
+2回目以降は `sec.submissions_max_age_days`（既定7日）/ `sec.companyfacts_max_age_days`
+（既定6日）より新しければ手元のものを使う。
 
 ## ドキュメント
 

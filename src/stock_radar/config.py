@@ -219,6 +219,8 @@ class SecRuntime(_Model):
     # submissions.zip は 1.5GB あるが、ユニバースは週次では動かない。
     # これより新しいファイルが手元にあれば再取得しない。
     submissions_max_age_days: int = Field(ge=0)
+    # companyfacts.zip は 1.4GB。SEC が毎晩 ET 3:00 頃に再生成する。
+    companyfacts_max_age_days: int = Field(ge=0)
 
 
 class ThrottleRuntime(_Model):

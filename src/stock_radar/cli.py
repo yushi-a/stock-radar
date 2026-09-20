@@ -21,6 +21,12 @@ from stock_radar.config import (
     load_runtime,
 )
 from stock_radar.sources.sec.client import SecClient
+from stock_radar.sources.sec.companyfacts import (
+    download_companyfacts,
+    iter_company_facts,
+    store_facts,
+    wanted_ciks,
+)
 from stock_radar.sources.sec.submissions import (
     apply_submission_profiles,
     download_submissions,
@@ -32,7 +38,7 @@ from stock_radar.sources.sec.universe import (
     fetch_ticker_rows,
     replace_ticker_rows,
 )
-from stock_radar.storage import DEFAULT_DB_PATH, open_database
+from stock_radar.storage import DEFAULT_DB_PATH, compact, open_database
 
 if TYPE_CHECKING:
     import duckdb
@@ -54,6 +60,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--force-download",
         action="store_true",
         help="submissions.zip が新しくても取り直す",
+    )
+
+    facts = sub.add_parser(
+        "fetch-facts",
+        help="companyfacts.zip を取り込んで facts_annual / facts_quarterly を作る",
+    )
+    facts.add_argument(
+        "--force-download",
+        action="store_true",
+        help="companyfacts.zip が新しくても取り直す",
     )
     return parser
 
@@ -104,6 +120,36 @@ def fetch_universe(runtime: Runtime, db_path: Path, market: Market, *, force: bo
     return 0
 
 
+def fetch_facts(runtime: Runtime, db_path: Path, market: Market, *, force: bool) -> int:
+    client = SecClient.from_runtime(runtime.sec)
+    zip_path = download_companyfacts(client, runtime.sec, force=force)
+
+    with open_database(db_path) as con:
+        keep = wanted_ciks(con, market=market)
+        if not keep:
+            log.error("universe が空。先に fetch-universe を実行する")
+            return 1
+        log.info("%s 社分を展開中…", f"{len(keep):,}")
+        annual, quarterly = store_facts(
+            con, iter_company_facts(zip_path, wanted=keep), market=market
+        )
+        print(f"\n=== 縦持ちテーブル（{market.value}）===")
+        print(f"{'facts_annual':<22} {annual:>9,} 行")
+        print(f"{'facts_quarterly':<22} {quarterly:>9,} 行")
+        covered = con.execute("SELECT count(DISTINCT cik) FROM facts_annual").fetchone()[0]
+        print(f"{'facts がある企業':<22} {covered:>9,} / {len(keep):,}")
+
+    # 125万行を丸ごと入れ替えるため、これをやらないと毎回約25MB 増え続ける。
+    # DuckDB は DELETE した領域をファイルに返さず、VACUUM も CHECKPOINT も効かない。
+    before, after = compact(db_path)
+    log.info(
+        "DuckDB ファイルを作り直した（%.0f MB → %.0f MB）",
+        before / 1024 / 1024,
+        after / 1024 / 1024,
+    )
+    return 0
+
+
 def _report(con: duckdb.DuckDBPyConnection, market: Market) -> None:
     """Phase 1 の検証項目：除外理由別の件数と残存社数。"""
     counts = exclusion_counts(con, market=market)
@@ -127,6 +173,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "fetch-universe":
         return fetch_universe(runtime, args.db, args.market, force=args.force_download)
+    if args.command == "fetch-facts":
+        return fetch_facts(runtime, args.db, args.market, force=args.force_download)
     raise AssertionError(f"未知のサブコマンド: {args.command}")
 
 
