@@ -1,0 +1,20 @@
+# ビルドコンテキストに入れないもの。
+#
+# data/ には companyfacts.zip（1.4GB）と DuckDB が入る。外さないとコンテキストの
+# 転送だけで実用的な時間を食う。実行時は PVC をマウントする。
+#
+# 先頭の `/` はコンテキストのルート直下だけを指す。`output` と書くと
+# `src/stock_radar/output/` まで巻き込みかねない（.gitignore で一度やった）。
+# docker の無視パターンは .gitignore と違い暗黙に再帰しないが、意図を明示しておく。
+/data/
+/output/
+/.venv/
+/.git/
+/.github/
+/.pytest_cache/
+/.ruff_cache/
+/tests/
+/docs/
+/.env
+**/__pycache__/
+*.pyc
