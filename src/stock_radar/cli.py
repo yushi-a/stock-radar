@@ -13,7 +13,7 @@ import argparse
 import datetime as dt
 import logging
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -118,6 +118,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-notify",
         action="store_true",
         help="notificator に通知しない（宛先はクラスタ内なのでローカルでは届かない）",
+    )
+
+    full = sub.add_parser("run", help="全工程を順に回す（CronJob が叩くのはこれ）")
+    full.add_argument("--limit", type=int, help="株価を取る銘柄を先頭 N 件に絞る")
+    full.add_argument("--tickers", help="株価を取る銘柄を直接指定する（カンマ区切り）")
+    full.add_argument("--no-notify", action="store_true", help="notificator に通知しない")
+    full.add_argument(
+        "--force-download", action="store_true", help="手元の zip が新しくても取り直す"
     )
     return parser
 
@@ -471,6 +479,58 @@ def _report(con: duckdb.DuckDBPyConnection, market: Market) -> None:
     print(f"{'残存ユニーク CIK':<22} {remaining:>7,}")
 
 
+def run_all(
+    runtime: Runtime,
+    criteria: Criteria,
+    db_path: Path,
+    market: Market,
+    *,
+    limit: int | None = None,
+    tickers: str | None = None,
+    send_notification: bool = True,
+    force: bool = False,
+) -> int:
+    """全工程を順に回す。CronJob が叩くのはこれ。
+
+    **順序は `docs/architecture.md` のパイプラインそのままで、崩さない**（CLAUDE.md）。
+    株価取得（yfinance）は必ず財務による足切りの後に走る。先に対象を減らすことが
+    429 対策の中核になっている。
+
+    途中で失敗したらそこで止めて非ゼロを返す。**半端なデータで候補を出さない。**
+    たとえば財務の取り込みに失敗した状態で先に進むと、古い `fundamentals` に
+    新しい株価を掛けた時価総額で判定することになる。
+    """
+    steps: list[tuple[str, Callable[[], int]]] = [
+        ("ユニバース確定", lambda: fetch_universe(runtime, db_path, market, force=force)),
+        ("財務指標", lambda: fetch_facts(runtime, db_path, market, force=force)),
+        (
+            "株価",
+            lambda: fetch_prices_command(
+                runtime, criteria, db_path, market, limit=limit, tickers=tickers
+            ),
+        ),
+        (
+            "スクリーニング",
+            lambda: screen_command(
+                runtime,
+                criteria,
+                db_path,
+                market,
+                with_price=True,
+                dry_run=False,
+                send_notification=send_notification,
+            ),
+        ),
+    ]
+    for index, (label, step) in enumerate(steps, start=1):
+        log.info("[%s/%s] %s", index, len(steps), label)
+        code = step()
+        if code != 0:
+            log.error("%s で失敗した（終了コード %s）。後続は実行しない", label, code)
+            return code
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = build_parser().parse_args(argv)
@@ -498,6 +558,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             with_price=not args.no_price_filters,
             dry_run=args.dry_run,
             send_notification=not args.no_notify,
+        )
+    if args.command == "run":
+        return run_all(
+            runtime,
+            load_criteria(args.criteria),
+            args.db,
+            args.market,
+            limit=args.limit,
+            tickers=args.tickers,
+            send_notification=not args.no_notify,
+            force=args.force_download,
         )
     raise AssertionError(f"未知のサブコマンド: {args.command}")
 
