@@ -160,6 +160,16 @@ class ScreenReport:
         with_quotes = sum(1 for item in targets if item.candidate.quotes is not None)
         return with_quotes / len(targets)
 
+    @property
+    def data_source(self) -> str:
+        """この run が何で判定したか。CSV と `screen_results` の両方に載せる。
+
+        指標ごとに採用した XBRL タグは `fundamentals.source_concepts` にある。
+        ここに書くのは「どのデータ源まで使ったか」で、株価を当てていない run は
+        その旨が残る。
+        """
+        return "sec_companyfacts+yfinance" if self.with_price else "sec_companyfacts"
+
     def blocked_counts(self, *, needs_price: bool | None = None) -> dict[str, Counter[str]]:
         """条件ごとに、閾値未満（``fail``）と判定不能（``unknown``）を分けて数える。
 
@@ -333,9 +343,7 @@ def store_run(
     ).fetchone()
     run_id = int(row[0])
 
-    # 出典は「どのデータ源で判定したか」。指標ごとに採用した XBRL タグは
-    # fundamentals.source_concepts にあり、CSV 出力（Phase 5）でそちらを使う。
-    source = "sec_companyfacts+yfinance" if report.with_price else "sec_companyfacts"
+    source = report.data_source
     rows = []
     for item in passed:
         candidate = item.candidate
