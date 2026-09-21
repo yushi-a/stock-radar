@@ -26,7 +26,8 @@ from stock_radar.config import (
     load_criteria,
     load_runtime,
 )
-from stock_radar.metrics.market import rebuild_market_metrics
+from stock_radar.metrics.market import multi_class_ciks, rebuild_market_metrics
+from stock_radar.output.csv_writer import csv_path_for, write_candidates
 from stock_radar.screen.evaluate import Track
 from stock_radar.screen.runner import (
     prescreen_tickers,
@@ -55,7 +56,7 @@ from stock_radar.sources.sec.universe import (
     fetch_ticker_rows,
     replace_ticker_rows,
 )
-from stock_radar.storage import DEFAULT_DB_PATH, compact, open_database
+from stock_radar.storage import DEFAULT_DB_PATH, compact, open_database, utc_now
 
 if TYPE_CHECKING:
     import duckdb
@@ -378,9 +379,36 @@ def screen_command(
                 )
 
         if dry_run:
-            log.info("dry-run なので screen_runs / screen_results には書かない")
+            log.info("dry-run なので CSV も screen_runs / screen_results も書かない")
             return 0
-        run_id = store_run(con, report, criteria)
+
+        # CSV と screen_runs で基準時刻を揃える。別々に取ると、日付をまたいだ実行で
+        # ファイル名と記録がずれる。
+        moment = utc_now()
+        path: Path | None = None
+        if with_price:
+            path = csv_path_for(runtime.output.csv_dir, market=market, as_of=moment.date())
+            # 複数クラス株の時価総額は近似（docs/xbrl-findings.md の C）。近似は近似として示す。
+            multi = multi_class_ciks(con)
+            written = write_candidates(
+                path,
+                report.passed,
+                market=market,
+                data_source=report.data_source,
+                as_of=moment,
+                approximate_tickers=[
+                    item.candidate.ticker for item in report.passed if item.candidate.cik in multi
+                ],
+            )
+            log.info("%s 行を %s に書いた", f"{written:,}", path)
+        else:
+            # 株価条件を当てていない一覧は評価スキルに渡す候補リストではない。
+            # 同じ名前で書くと、本番の run の CSV を測定用の中間結果で上書きしてしまう。
+            log.info("株価条件を当てていないので CSV は書かない")
+
+        run_id = store_run(
+            con, report, criteria, csv_path=str(path) if path else None, run_at=moment
+        )
         log.info("run_id=%s として記録した（通過 %s 件）", run_id, f"{len(report.passed):,}")
     return 0
 
