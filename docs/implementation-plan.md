@@ -219,10 +219,16 @@ Phase 2a で決めたルールを実装する。
 | 実行ユーザー | uid=10001(app)。`--user` で任意の UID を与えても動く |
 | 実データでの `screen` | 手元の DuckDB をマウントして完走。候補22件・CSV 出力までローカルと一致 |
 
-### 6-2. GHCR への push（本リポジトリ）
+### 6-2. GHCR への push（本リポジトリ）✅ 2026-09-21
 
-- GitHub Actions で main への push 時にビルドして `ghcr.io/yushi-a/stock-radar` へ
-- タグは git SHA と semver。`GITHUB_TOKEN` で認証できるため追加のシークレットは不要
+`.github/workflows/image.yml`。
+
+- main への push とタグ（`v*.*.*`）でビルドして `ghcr.io/yushi-a/stock-radar` へ push する
+- **PR ではビルドして起動確認だけ行い push しない。** Dockerfile の破損を main の手前で拾う
+- タグは `sha-<full sha>` / `latest`（main のみ）/ semver。`GITHUB_TOKEN` で認証でき、追加のシークレットは不要
+- **Helmfile から参照するのは `sha-` タグ**。どのコミットが動いているかをイメージ名だけで特定できる
+- ビルド後に `--help` と「非 root であること・`curl` があること」を実際に走らせて見る。
+  ビルドが通るだけでは実行層の壊れを拾えない
 
 ### 6-3. Helm チャート（helm リポジトリ）
 

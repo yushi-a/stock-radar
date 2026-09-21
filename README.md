@@ -63,6 +63,9 @@ docker run --rm \
 （クラスタでは PVC）。非 root（uid 10001）で動くが、`--user` で任意の UID を
 与えても動く。K8s 側は `fsGroup` で PVC の所有者を合わせる。
 
+main に入ったものは `ghcr.io/yushi-a/stock-radar` に push される。
+タグは `sha-<コミットの SHA>` と `latest`。クラスタから参照するのは前者。
+
 ## ドキュメント
 
 | ファイル | 内容 |
