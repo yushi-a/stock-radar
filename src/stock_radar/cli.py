@@ -20,6 +20,7 @@ from stock_radar.config import (
     Runtime,
     load_runtime,
 )
+from stock_radar.metrics.market import rebuild_market_metrics
 from stock_radar.sources.prices.fetcher import fetch_prices
 from stock_radar.sources.prices.yfinance_client import YFinanceSource
 from stock_radar.sources.sec.client import SecClient
@@ -231,6 +232,18 @@ def fetch_prices_command(
                 )
         if report.stopped_on_budget:
             log.warning("時間予算で打ち切った。残りは次の run に持ち越される")
+
+        produced = rebuild_market_metrics(con, market=market.value)
+        print(f"{'market_metrics':<22} {produced:>7,} 銘柄")
+        approximate = con.execute(
+            "SELECT count(*) FROM market_metrics m "
+            "JOIN universe u ON u.ticker = m.ticker AND u.market = ? "
+            "WHERE u.cik IN (SELECT cik FROM universe WHERE excluded_reason IS NULL "
+            "                GROUP BY cik HAVING count(DISTINCT ticker) > 1)",
+            [market.value],
+        ).fetchone()[0]
+        if approximate:
+            print(f"{'うち時価総額が近似':<22} {approximate:>7,}（複数クラス株）")
 
         failures = con.execute(
             "SELECT error_class, count(*) FROM fetch_failures GROUP BY 1 ORDER BY 2 DESC"
