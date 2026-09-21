@@ -18,9 +18,11 @@
 ## 未決事項
 
 ### 実装開始までに決めるもの
-- [ ] `notificator` のインターフェース（エンドポイント・ペイロード形式・認証）の確認。実装時でよい
+- [x] `notificator` のインターフェース（2026-09-20 確認）。Connect の JSON を素の HTTP POST。認証は無い
 - [ ] local PVC を使う場合の DuckDB ファイルのバックアップ方法（local PVC はノードローカルで冗長性が無い）
-- [ ] `pollux` ノードのディスク空き容量の確認。定常3〜5GB（`companyfacts.zip` 1世代 + DuckDB + 作業領域）を必要とする
+  - `local-path` の reclaimPolicy は **Delete**。PVC を消すとデータも消えるため、チャート側では
+    `helm.sh/resource-policy: keep` で PVC を残すようにした（2026-09-21）。バックアップそのものは未決
+- [x] `pollux` ノードのディスク空き容量（2026-09-21 確認）。**322GB 空き**。10Gi の PVC で足りる
 
 ### Phase 2a（データ構造の実地調査）で決めたもの
 

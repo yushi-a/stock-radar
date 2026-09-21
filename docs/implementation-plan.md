@@ -230,9 +230,12 @@ Phase 2a で決めたルールを実装する。
 - ビルド後に `--help` と「非 root であること・`curl` があること」を実際に走らせて見る。
   ビルドが通るだけでは実行層の壊れを拾えない
 
-### 6-3. Helm チャート（helm リポジトリ）
+### 6-3. Helm チャートとリリース定義（helm リポジトリ）✅ 2026-09-21（PR 提出済み・マージ待ち）
 
-`charts/stock-radar/` を `stock-notificator` に倣って作る。差分は以下。
+`yushi-a/helm` の [PR #8](https://github.com/yushi-a/helm/pull/8)。検証に `helmfile diff` が要るため、
+チャート（issue #1 の18番）とリリース定義（19番）を1つの PR にまとめた。
+
+`charts/stock-radar/` を `stock-notificator` に倣って作った。差分は以下。
 
 - **PVC（local-path）を追加する。** 既存チャートに前例が無いので新規に書く。
   DuckDB ファイルと `data/raw/` を置く。容量は 10GB 程度（`docs/architecture.md` の見積もり）
@@ -241,19 +244,37 @@ Phase 2a で決めたルールを実装する。
   これが無いと本体が終わっても Job が完了しない
 - `concurrencyPolicy: Forbid`（`stock-notificator` のテンプレートでは既定で入っている）
 - `activeDeadlineSeconds` は時間予算 + 余裕、`backoffLimit` は低め
-- `criteria.yaml` / `runtime.yaml` は ConfigMap でマウントする
-- namespace は新規に切る想定。private イメージなら registry-secret も新 namespace に要る
-- **SOPS の secret は不要の見込み。** notificator に認証は無く、`SEC_USER_AGENT` は
-  SEC に開示する連絡先であって秘密ではない
+- `criteria.yaml` / `runtime.yaml` の ConfigMap は**既定で作らない**。値を渡したときだけ
+  その1ファイルを `subPath` で差し替える。イメージの外に第2の正本を作らないため
+- namespace は新規に `stock-radar` を切る。**イメージが public なので registry-secret は不要**
+- ~~**SOPS の secret は不要の見込み。**~~ → **使うことにした（2026-09-21）。**
+  notificator に認証が無いのは変わらないが、`SEC_USER_AGENT` は連絡先（メールアドレス）であり、
+  平文でリポジトリに残さない方針（`CLAUDE.md`）を優先した。private リポジトリでも履歴には残る
 
-**検証**：`helm template` / `helm lint` と `helmfile diff` まで。
+**検証**（2026-09-21 実施）：
+
+- `helm lint` / `helm template`（設定差し替えの分岐も含む）
+- `kubectl apply --dry-run=client` で Secret / PVC / CronJob の3つが通る
+- `helmfile -f stock-radar.yaml diff` が SOPS の復号込みで通る（3リソースが added）
+
+実地で分かったこと：
+
+| | |
+|---|---|
+| ストレージクラス | `local-path` が既定（`WaitForFirstConsumer` / reclaim は **Delete**）。PVC を消すとデータも消えるので `helm.sh/resource-policy: keep` を付けた |
+| `pollux` のディスク | **322GB 空き**。10Gi の PVC には十分（未確認だった宿題を解消） |
+| イメージの公開範囲 | `ghcr.io/yushi-a/stock-radar` は **public**。匿名 pull を確認したので **registry-secret は不要** |
+| `NOTIFICATOR_ADDRESS` | **スキームまで含めた URL を渡す**（`http://notificator.notification.svc.cluster.local:50051`）。Connect の JSON を素の HTTP POST で叩くため、`stock-notificator` の gRPC ダイアル先とは形が違う |
+| SEC の User-Agent | SOPS の `environments/secrets/stock-radar.yaml` から渡す。**中身はプレースホルダなので apply 前に差し替える** |
+
+**`apply` はしていない。** 実環境での確認は 6-4（🔴 G5）。
 
 ### 6-4. デプロイと実環境での動作確認 🔴 ゲート
 
 `helmfile -f stock-radar.yaml diff` → `apply` の後、手動トリガーで確認する。
 
 ```bash
-kubectl create job --from=cronjob/stock-radar stock-radar-manual-1 -n <ns>
+kubectl create job --from=cronjob/stock-radar stock-radar-manual-1 -n stock-radar
 ```
 
 | 確認項目 | 見るもの |
