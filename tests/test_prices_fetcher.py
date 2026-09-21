@@ -155,10 +155,12 @@ def test_tickers_option_selects_named_symbols(
 def test_start_date_is_a_full_window_without_history(
     con: duckdb.DuckDBPyConnection, runtime: PricesRuntime
 ) -> None:
+    from stock_radar.sources.prices.fetcher import window_start
+
     seed(con, ["AAA"])
     start, full = start_date_for(con, "AAA", runtime, today=TODAY)
     assert full is True
-    assert start == TODAY - dt.timedelta(days=runtime.window_days)
+    assert start == window_start(TODAY, runtime.window_days)
 
 
 def test_start_date_overlaps_existing_history(
@@ -376,3 +378,25 @@ def test_initial_fetch_is_not_reported_as_a_split(
     report, _ = run(con, source, runtime)
     assert report.initial_fetches == 1
     assert report.split_refetches == 0
+
+
+# --- 取得ウィンドウ ---------------------------------------------------------
+
+
+def test_window_start_covers_fifty_two_weeks(runtime: PricesRuntime) -> None:
+    """window_days は営業日。暦日として引くと52週に届かない。
+
+    52週高安には約252営業日（364暦日）が要る。ここを取り違えると、
+    高値・安値が「1年分」ではなく45週分から計算されて静かに誤る。
+    """
+    from stock_radar.sources.prices.fetcher import window_start
+
+    start = window_start(TODAY, runtime.window_days)
+    assert (TODAY - start).days >= 364
+
+
+def test_window_start_scales_with_business_days() -> None:
+    from stock_radar.sources.prices.fetcher import HOLIDAY_BUFFER_DAYS, window_start
+
+    start = window_start(TODAY, 5)
+    assert (TODAY - start).days == 7 + HOLIDAY_BUFFER_DAYS
