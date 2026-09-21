@@ -69,9 +69,11 @@ src/stock_radar/
     fundamentals.py         売上CAGR・利益率・FCF・ROA/ROE・資産成長率
     market.py               時価総額・売買代金・52週高安・PBR/PSR/FCF利回り
   screen/
-    filters.py              共通足切り
+    filters.py              判定の三値（通過 / 不通過 / 判定不能）と共通足切り
     track_a.py / track_b.py
     timing.py               並べ替え用スコア
+    evaluate.py             上記を1銘柄に通す（純粋関数の最上位）
+    runner.py               DuckDB からの読み出しと screen_runs / screen_results への記録
   output/
     csv_writer.py
     notify.py               notificator への送信（インターフェースは実装時に確認）
