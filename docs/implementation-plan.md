@@ -202,10 +202,22 @@ Phase 2a で決めたルールを実装する。
 マニフェストは **`yushi-a/helm`（別リポジトリ）** に置く。既存の `stock-notificator` チャートが最も近い前例。
 クラスタの流儀は `docs/architecture.md` の「クラスタの流儀」を参照。
 
-### 6-1. Dockerfile（本リポジトリ）
+### 6-1. Dockerfile（本リポジトリ）✅ 2026-09-21
 
-- uv ベースのマルチステージビルド、非 root 実行
-- ローカルでビルドして `stock-radar --help` が動くところまで確認
+- uv ベースのマルチステージビルド、非 root 実行（uid 10001）
+- ビルド層で `uv sync --locked --no-dev --no-editable`。実行層へ運ぶのは `.venv` と `config/` だけ
+- **`curl` を実行層に入れてある。** Istio サイドカーの `/quitquitquit` に要る（無いと Job が完了しない）
+- `data/` `output/` は相対パスで参照しているので `/app` 配下に器を作る。クラスタでは PVC をマウントする
+
+実測（2026-09-21、ローカル）：
+
+| | |
+|---|---|
+| イメージサイズ | 409MB（大半は yfinance が引く pandas / numpy） |
+| ビルド時間 | 24秒（キャッシュなし） |
+| `stock-radar --help` | 動く |
+| 実行ユーザー | uid=10001(app)。`--user` で任意の UID を与えても動く |
+| 実データでの `screen` | 手元の DuckDB をマウントして完走。候補22件・CSV 出力までローカルと一致 |
 
 ### 6-2. GHCR への push（本リポジトリ）
 

@@ -25,7 +25,7 @@ uv run pytest                # テスト
 手動スモークテストに留める。方針は [docs/testing.md](docs/testing.md) を参照。
 
 環境変数は `.env.example` をコピーして `.env` を作り、`set -a; source .env; set +a` で読み込む。
-（CLI からの自動読み込みは Phase 5 で入れる。K8s では ConfigMap と env で渡す。）
+CLI 側では読み込まない（K8s では ConfigMap と env で渡すため、二重の経路を作らない）。
 
 ### 実行
 
@@ -46,6 +46,22 @@ uv run stock-radar fetch-prices --tickers AAPL,MSFT  # 銘柄を直接指定
 初回は `submissions.zip`（1.5GB）と `companyfacts.zip`（1.4GB）を落とすので数分かかる。
 2回目以降は `sec.submissions_max_age_days`（既定7日）/ `sec.companyfacts_max_age_days`
 （既定6日）より新しければ手元のものを使う。
+
+### コンテナ
+
+`run` が全工程を順に回す。CronJob が叩くのもこれ。
+
+```bash
+docker build -t stock-radar:dev .
+docker run --rm \
+  -v "$PWD/data:/app/data" -v "$PWD/output:/app/output" \
+  -e SEC_USER_AGENT -e NOTIFICATOR_ADDRESS \
+  stock-radar:dev run --limit 10
+```
+
+`data/` と `output/` は相対パスで参照しているので、`/app` 配下にマウントする
+（クラスタでは PVC）。非 root（uid 10001）で動くが、`--user` で任意の UID を
+与えても動く。K8s 側は `fsGroup` で PVC の所有者を合わせる。
 
 ## ドキュメント
 
