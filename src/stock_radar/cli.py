@@ -322,6 +322,7 @@ def screen_command(
         for track, count in report.track_counts.items():
             print(f"{'通過（トラック' + track + '）':<26} {count:>7,}")
         print(f"{'通過（実数）':<26} {len(report.passed):>7,}")
+        print(f"{'株価取得の対象（足切り後）':<26} {len(report.price_targets):>7,}")
         if report.price_coverage is not None:
             print(f"{'price_coverage':<26} {report.price_coverage:>7.1%}")
             if with_price and report.price_coverage < runtime.prices.coverage_warn_threshold:
@@ -332,17 +333,36 @@ def screen_command(
                 )
 
         # 判定できた割合。docs/xbrl-findings.md の E と同じ定義で、データ側の回帰に気づくため。
-        print("\n=== トラックを判定できた割合 ===")
+        # 株価が要る条件は数えない（株価を取りに行っていない銘柄まで判定不能に数えると、
+        # 財務データの質とは無関係に数字が動く）。
+        print("\n=== トラックの財務条件を判定できた割合 ===")
         for track in Track:
             count = report.decidable(track)
             print(f"{'トラック' + track.value:<26} {count:>7,} = {count / report.evaluated:6.1%}")
 
         # 通過件数だけでは閾値をどちらに動かせばよいか分からない。
         # 閾値未満（緩めれば増える）と判定不能（緩めても増えない）を分けて出す。
-        print("\n=== 落とした条件の内訳（延べ。閾値未満 / 判定不能）===")
+        # パイプラインの順に合わせ、財務で落ちた分と株価で落ちた分を分けて並べる。
         blocked = report.blocked_counts()
-        for name, counts in sorted(blocked.items(), key=lambda kv: -sum(kv[1].values())):
-            print(f"{name:<42} {counts['fail']:>7,} / {counts['unknown']:>7,}")
+        price_names = {
+            "common.market_cap",
+            "common.avg_daily_value",
+            "track_a.fcf_yield",
+            "track_a.pbr",
+            "track_b.psr",
+        }
+        for title, wanted in (
+            ("財務で落ちた内訳（延べ。閾値未満 / 判定不能）", False),
+            ("株価で落ちた内訳（足切りを通った銘柄のみ）", True),
+        ):
+            rows = {
+                name: counts for name, counts in blocked.items() if (name in price_names) is wanted
+            }
+            if not rows:
+                continue
+            print(f"\n=== {title} ===")
+            for name, counts in sorted(rows.items(), key=lambda kv: -sum(kv[1].values())):
+                print(f"{name:<42} {counts['fail']:>7,} / {counts['unknown']:>7,}")
 
         for message in warn_on_quality(report):
             log.warning("データ品質: %s", message)

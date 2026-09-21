@@ -164,7 +164,34 @@ def test_both_tracks_keep_track_a_as_representative(criteria: Criteria) -> None:
 def test_common_filter_blocks(criteria: Criteria, kwargs: dict[str, Any], name: str) -> None:
     result = evaluate(make(**kwargs), criteria)
     assert not result.passed
-    assert [item.name for item in result.blocking] == [name]
+    assert name in [item.name for item in result.blocking]
+
+
+def test_blocking_reports_fundamentals_before_prices(criteria: Criteria) -> None:
+    """財務で落ちた銘柄の株価条件は、落ちた理由ではない。
+
+    株価は財務の足切りの後にしか取らないので、財務で落ちた銘柄には株価が無く、
+    価格条件は必ず判定不能になる。これを内訳に混ぜると「時価総額が判定不能」で
+    埋まって、本当の理由が見えなくなる。
+    """
+    result = evaluate(make(revenue_cagr_3y=0.05, no_quotes=True), criteria)
+    assert not result.prescreened
+    names = [item.name for item in result.blocking]
+    assert "track_a.revenue_cagr_3y" in names
+    assert not any(item.needs_price for item in result.blocking)
+
+
+def test_blocking_reports_prices_when_fundamentals_pass(criteria: Criteria) -> None:
+    """財務を通った銘柄は、株価条件で落ちた理由を返す。"""
+    result = evaluate(make(market_cap=9_000_000_000.0), criteria)
+    assert result.prescreened
+    assert all(item.needs_price for item in result.blocking)
+    assert "common.market_cap" in [item.name for item in result.blocking]
+
+
+def test_prescreened_is_false_when_fundamentals_fail(criteria: Criteria) -> None:
+    assert evaluate(make(equity=-1.0), criteria).prescreened is False
+    assert evaluate(make(**TRACK_B), criteria).prescreened is True
 
 
 def test_negative_equity_does_not_break_pbr(criteria: Criteria) -> None:

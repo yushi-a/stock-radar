@@ -140,37 +140,57 @@ class ScreenReport:
         return counts
 
     @property
+    def price_targets(self) -> list[Evaluation]:
+        """株価を取りに行った（べき）銘柄。財務の足切りを通ったもの。"""
+        return [item for item in self.evaluations if item.prescreened]
+
+    @property
     def price_coverage(self) -> float | None:
-        """判定対象のうち、株価が手元にある割合。
+        """**株価を取りに行った銘柄のうち**、実際に株価がある割合。
 
         低い run は「相場のせいで候補が少ない」のではなく「取りこぼしのせい」。
-        分母は**この run で判定した銘柄**（ユニバース全体ではない）。
-        """
-        if not self.evaluations:
-            return None
-        with_quotes = sum(1 for item in self.evaluations if item.candidate.quotes is not None)
-        return with_quotes / len(self.evaluations)
 
-    def blocked_counts(self) -> dict[str, Counter[str]]:
+        ⚠️ 分母をユニバース全体にしてはいけない。パイプラインは財務の足切りが
+        先で、落ちた銘柄の株価はそもそも取りに行っていない。全体を分母にすると
+        取りこぼしゼロでも 6.9% と出て、警告が鳴りっぱなしになる。
+        """
+        targets = self.price_targets
+        if not targets:
+            return None
+        with_quotes = sum(1 for item in targets if item.candidate.quotes is not None)
+        return with_quotes / len(targets)
+
+    def blocked_counts(self, *, needs_price: bool | None = None) -> dict[str, Counter[str]]:
         """条件ごとに、閾値未満（``fail``）と判定不能（``unknown``）を分けて数える。
 
         落ちた銘柄の**すべての**不通過条件を数えるので、合計は銘柄数と一致しない。
         「B の粗利率さえ取れていれば通った」のような分布を見るための数字。
+
+        ``needs_price`` を渡すと、株価が要る条件だけ / 要らない条件だけに絞る。
+        パイプラインの段（財務 → 株価）ごとに内訳を読むため。
         """
         counts: dict[str, Counter[str]] = {}
         for item in self.evaluations:
             for check in item.blocking:
+                if needs_price is not None and check.needs_price is not needs_price:
+                    continue
                 counts.setdefault(check.name, Counter())[check.verdict.value] += 1
         return counts
 
     def decidable(self, track: Track) -> int:
-        """そのトラックを「判定できた」銘柄数（判定不能が1つも無い）。
+        """そのトラックの**財務条件**を判定できた銘柄数（判定不能が1つも無い）。
 
-        docs/xbrl-findings.md の E と同じ定義。データ側の回帰に気づくために出す。
+        docs/xbrl-findings.md の E と同じ定義で、データ側の回帰に気づくために出す。
+
+        株価が要る条件は数えない。株価は財務の足切りの後にしか取らないので、
+        含めると「株価を取りに行かなかった銘柄はすべて判定不能」になり、
+        財務データの質とは無関係に数字が動く。
         """
         checks = {Track.A: lambda item: item.track_a, Track.B: lambda item: item.track_b}[track]
         return sum(
-            1 for item in self.evaluations if not any(check.undecidable for check in checks(item))
+            1
+            for item in self.evaluations
+            if not any(check.undecidable for check in checks(item) if not check.needs_price)
         )
 
 
@@ -185,7 +205,6 @@ def load_candidates(
     metrics = compute_universe_metrics(con)
 
     latest: dict[int, Fundamentals] = {}
-    filed: dict[int, dt.date | None] = {}
     for row in con.execute(_LATEST_FUNDAMENTALS_SQL).fetchall():
         cik = int(row[0])
         latest[cik] = Fundamentals(
@@ -209,7 +228,6 @@ def load_candidates(
             accn=row[17],
             filed_at=row[18],
         )
-        filed[cik] = row[18]
 
     quotes: dict[str, MarketMetrics] = {}
     for row in con.execute(_MARKET_METRICS_SQL).fetchall():
