@@ -6,7 +6,9 @@ __pycache__/
 data/
 *.parquet
 *.duckdb
-output/
+# 先頭の / が要る。`output/` だとどの階層にも一致し、
+# src/stock_radar/output/（CSV 出力と通知の実装）まで無視される。
+/output/
 .pytest_cache/
 .ruff_cache/
 dist/
