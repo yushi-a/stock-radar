@@ -10,6 +10,7 @@ dependencies = [
     "httpx>=0.28.1",
     "pydantic>=2.13.5",
     "pyyaml>=6.0.3",
+    "yfinance==1.7.0",
 ]
 
 [project.scripts]

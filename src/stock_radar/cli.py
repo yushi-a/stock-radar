@@ -20,6 +20,8 @@ from stock_radar.config import (
     Runtime,
     load_runtime,
 )
+from stock_radar.sources.prices.fetcher import fetch_prices
+from stock_radar.sources.prices.yfinance_client import YFinanceSource
 from stock_radar.sources.sec.client import SecClient
 from stock_radar.sources.sec.companyfacts import (
     download_companyfacts,
@@ -72,6 +74,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="companyfacts.zip が新しくても取り直す",
     )
+
+    prices = sub.add_parser(
+        "fetch-prices", help="yfinance で日次株価を差分取得して prices_daily を更新する"
+    )
+    # 全銘柄の実行はデプロイ後に環境上で行う。それまではここで絞る。
+    prices.add_argument("--limit", type=int, help="先頭 N 銘柄だけ取得する")
+    prices.add_argument("--tickers", help="銘柄を直接指定する（カンマ区切り。例: AAPL,MSFT）")
     return parser
 
 
@@ -186,6 +195,53 @@ def fetch_facts(runtime: Runtime, db_path: Path, market: Market, *, force: bool)
     return 0
 
 
+def fetch_prices_command(
+    runtime: Runtime,
+    db_path: Path,
+    market: Market,
+    *,
+    limit: int | None,
+    tickers: str | None,
+) -> int:
+    names = [t for t in (tickers or "").split(",") if t.strip()] or None
+    with open_database(db_path) as con:
+        report = fetch_prices(
+            con,
+            YFinanceSource(),
+            runtime.prices,
+            market=market,
+            limit=limit,
+            tickers=names,
+        )
+
+        print(f"\n=== 株価取得（{market.value}）===")
+        print(f"{'対象':<22} {report.targets:>7,} 銘柄")
+        print(f"{'成功':<22} {report.succeeded:>7,}")
+        print(f"{'失敗':<22} {report.failed:>7,}")
+        print(f"{'初回フル取得':<22} {report.initial_fetches:>7,}")
+        print(f"{'遡及調整で再取得':<22} {report.split_refetches:>7,}")
+        print(f"{'書き込んだ日次バー':<22} {report.bars_written:>7,}")
+        if report.coverage is not None:
+            print(f"{'price_coverage':<22} {report.coverage:>7.1%}")
+            if report.coverage < runtime.prices.coverage_warn_threshold:
+                log.warning(
+                    "price_coverage が閾値 %.0f%% を下回った。"
+                    "候補が少ないのは相場ではなく取りこぼしの可能性がある",
+                    runtime.prices.coverage_warn_threshold * 100,
+                )
+        if report.stopped_on_budget:
+            log.warning("時間予算で打ち切った。残りは次の run に持ち越される")
+
+        failures = con.execute(
+            "SELECT error_class, count(*) FROM fetch_failures GROUP BY 1 ORDER BY 2 DESC"
+        ).fetchall()
+        if failures:
+            print("\n=== 失敗の内訳 ===")
+            for error_class, count in failures:
+                print(f"{error_class:<22} {count:>7,}")
+    return 0
+
+
 def _report(con: duckdb.DuckDBPyConnection, market: Market) -> None:
     """Phase 1 の検証項目：除外理由別の件数と残存社数。"""
     counts = exclusion_counts(con, market=market)
@@ -211,6 +267,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return fetch_universe(runtime, args.db, args.market, force=args.force_download)
     if args.command == "fetch-facts":
         return fetch_facts(runtime, args.db, args.market, force=args.force_download)
+    if args.command == "fetch-prices":
+        return fetch_prices_command(
+            runtime, args.db, args.market, limit=args.limit, tickers=args.tickers
+        )
     raise AssertionError(f"未知のサブコマンド: {args.command}")
 
 
