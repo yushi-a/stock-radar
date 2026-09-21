@@ -32,6 +32,15 @@ uv run pytest                # テスト
 ```bash
 uv run stock-radar fetch-universe      # SEC からユニバースを取得して universe を作る
 uv run stock-radar fetch-facts         # companyfacts を取り込んで縦持ちテーブルを作る
+uv run stock-radar fetch-prices        # yfinance で日次株価を差分取得する
+```
+
+株価取得は**対象銘柄数を外から絞れる**。全銘柄の実行は時間がかかるので、
+デプロイ後に環境上で行う。
+
+```bash
+uv run stock-radar fetch-prices --limit 10           # 先頭10銘柄だけ
+uv run stock-radar fetch-prices --tickers AAPL,MSFT  # 銘柄を直接指定
 ```
 
 初回は `submissions.zip`（1.5GB）と `companyfacts.zip`（1.4GB）を落とすので数分かかる。
