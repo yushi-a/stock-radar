@@ -28,8 +28,10 @@ from stock_radar.config import (
 )
 from stock_radar.metrics.market import multi_class_ciks, rebuild_market_metrics
 from stock_radar.output.csv_writer import csv_path_for, write_candidates
+from stock_radar.output.notify import build_message, httpx_poster, notify, summary_lines
 from stock_radar.screen.evaluate import Track
 from stock_radar.screen.runner import (
+    ScreenReport,
     prescreen_tickers,
     screen,
     store_run,
@@ -110,7 +112,12 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     screen_cmd.add_argument(
-        "--dry-run", action="store_true", help="判定して表示するだけで DB に書かない"
+        "--dry-run", action="store_true", help="判定して表示するだけで DB にも CSV にも書かない"
+    )
+    screen_cmd.add_argument(
+        "--no-notify",
+        action="store_true",
+        help="notificator に通知しない（宛先はクラスタ内なのでローカルでは届かない）",
     )
     return parser
 
@@ -308,6 +315,7 @@ def screen_command(
     *,
     with_price: bool,
     dry_run: bool,
+    send_notification: bool,
 ) -> int:
     with open_database(db_path) as con:
         report = screen(con, criteria, market=market, with_price=with_price)
@@ -410,7 +418,41 @@ def screen_command(
             con, report, criteria, csv_path=str(path) if path else None, run_at=moment
         )
         log.info("run_id=%s として記録した（通過 %s 件）", run_id, f"{len(report.passed):,}")
+
+        if send_notification:
+            _notify(runtime, report, moment=moment, market=market, csv_path=path)
     return 0
+
+
+def _notify(
+    runtime: Runtime,
+    report: ScreenReport,
+    *,
+    moment: dt.datetime,
+    market: Market,
+    csv_path: Path | None,
+) -> None:
+    """結果の要約を notificator に送る。**失敗しても run は落とさない。**
+
+    CSV が出ていれば運用は続けられるので、通知の不達をブロッカーにしない。
+    """
+    lines = summary_lines(
+        run_at=moment,
+        market=market.value,
+        universe_size=report.universe_size,
+        track_counts=report.track_counts,
+        passed=report.passed,
+        price_coverage=report.price_coverage,
+        coverage_warn_threshold=runtime.prices.coverage_warn_threshold,
+        csv_path=str(csv_path) if csv_path else None,
+        top_n=runtime.notify.top_n,
+    )
+    message = build_message(lines, max_chars=runtime.notify.max_message_chars)
+    result = notify(message, runtime.notify, poster=httpx_poster)
+    if result.sent:
+        log.info("notificator に通知した（%s 文字）", len(result.message))
+    else:
+        log.warning("notificator への通知に失敗した: %s", result.error)
 
 
 def _report(con: duckdb.DuckDBPyConnection, market: Market) -> None:
@@ -455,6 +497,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.market,
             with_price=not args.no_price_filters,
             dry_run=args.dry_run,
+            send_notification=not args.no_notify,
         )
     raise AssertionError(f"未知のサブコマンド: {args.command}")
 
