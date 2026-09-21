@@ -54,5 +54,5 @@ def evaluate(candidate: Candidate, criteria: Criteria, *, with_price: bool = Tru
         ),
     ]
     if with_price:
-        checks.append(check("track_b.psr", candidate.psr, track.psr))
+        checks.append(check("track_b.psr", candidate.psr, track.psr, needs_price=True))
     return checks

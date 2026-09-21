@@ -67,19 +67,46 @@ class Evaluation:
         return marks + tuple(item.name for item in self.checks if item.passed)
 
     @property
+    def prescreened(self) -> bool:
+        """株価を取りに行く価値があったか（株価が要らない条件だけで見て通るか）。
+
+        パイプラインは財務の足切りが先なので、ここが False の銘柄には**そもそも
+        株価を取りに行っていない**。`price_coverage` の分母をこれで測らないと、
+        取りこぼしていないのに「取りこぼした」と警告が出る。
+        """
+        common_ok = all(item.passed for item in self.common if not item.needs_price)
+        if not common_ok:
+            return False
+        return any(
+            all(item.passed for item in checks if not item.needs_price)
+            for checks in (self.track_a, self.track_b)
+        )
+
+    @property
     def blocking(self) -> tuple[Check, ...]:
         """落ちた理由。通過していれば空。
 
-        共通足切りで落ちていればそれだけを返す。トラックまで進んでいれば、
-        A と B の**両方**の落ちた条件を返す。「B の粗利率さえ取れていれば通った」
-        のような分布を数えるのに要る（ゲート G3 の判断材料）。
+        **パイプラインの順に返す。** 財務で落ちた銘柄には株価が無いので、その
+        株価条件は「判定不能」になるが、それは落ちた理由ではない。混ぜると
+        内訳が「時価総額が判定不能」で埋まって、本当の理由が見えなくなる。
+
+        1. 共通足切りの財務条件
+        2. トラック A / B の財務条件（**両方**返す。「B の粗利率さえ取れていれば
+           通った」のような分布を数えるため）
+        3. 財務を通っていれば、株価が要る条件
         """
         if self.passed:
             return ()
-        blocked = tuple(item for item in self.common if not item.passed)
+        blocked = tuple(item for item in self.common if not item.passed and not item.needs_price)
         if blocked:
             return blocked
-        return tuple(item for item in self.track_a + self.track_b if not item.passed)
+        if not self.prescreened:
+            return tuple(
+                item
+                for item in self.track_a + self.track_b
+                if not item.passed and not item.needs_price
+            )
+        return tuple(item for item in self.checks if not item.passed and item.needs_price)
 
     def value_of(self, name: str) -> float | None:
         """条件名で判定に使った値を引く。CSV と `screen_results` の列埋めに使う。"""

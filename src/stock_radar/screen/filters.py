@@ -60,11 +60,18 @@ class Verdict(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class Check:
-    """1条件の判定結果。``value`` は判定に使った値（取れなければ None）。"""
+    """1条件の判定結果。``value`` は判定に使った値（取れなければ None）。
+
+    ``needs_price`` は株価が要る条件（時価総額・売買代金・PBR・PSR・FCF利回り）。
+    パイプラインでは財務の足切りが先なので、**財務で落ちた銘柄の株価条件は
+    「取りこぼし」ではなく「そもそも取りに行っていない」**。両者を混ぜると
+    `price_coverage` が実態とかけ離れる。
+    """
 
     name: str
     verdict: Verdict
     value: float | None = None
+    needs_price: bool = False
 
     @property
     def passed(self) -> bool:
@@ -127,11 +134,14 @@ class Candidate:
         return _fcf_yield(self.metrics.fcf, self.market_cap)
 
 
-def check(name: str, value: float | None, threshold: Threshold) -> Check:
+def check(
+    name: str, value: float | None, threshold: Threshold, *, needs_price: bool = False
+) -> Check:
     """閾値に当てる。値が無ければ判定不能。"""
     if value is None:
-        return Check(name, Verdict.UNKNOWN)
-    return Check(name, Verdict.PASS if threshold.contains(value) else Verdict.FAIL, value)
+        return Check(name, Verdict.UNKNOWN, needs_price=needs_price)
+    verdict = Verdict.PASS if threshold.contains(value) else Verdict.FAIL
+    return Check(name, verdict, value, needs_price=needs_price)
 
 
 def check_positive(name: str, value: float | None) -> Check:
@@ -173,8 +183,15 @@ def common_checks(
         checks.append(check_positive("common.revenue_positive", candidate.fundamentals.revenue))
     if with_price:
         limits = common.for_market(candidate.market)
-        checks.append(check("common.market_cap", candidate.market_cap, limits.market_cap))
         checks.append(
-            check("common.avg_daily_value", candidate.avg_daily_value, limits.avg_daily_value)
+            check("common.market_cap", candidate.market_cap, limits.market_cap, needs_price=True)
+        )
+        checks.append(
+            check(
+                "common.avg_daily_value",
+                candidate.avg_daily_value,
+                limits.avg_daily_value,
+                needs_price=True,
+            )
         )
     return checks

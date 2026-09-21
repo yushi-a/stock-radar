@@ -187,12 +187,62 @@ def test_blocked_counts_separate_failures_from_undecidable(
     assert "fail" not in blocked["track_b.gross_margin"]
 
 
-def test_price_coverage_counts_missing_quotes(
+def test_price_coverage_only_counts_price_targets(
     universe: duckdb.DuckDBPyConnection, criteria: Criteria
 ) -> None:
+    """分母は**株価を取りに行った銘柄**。財務で落ちた CCC は数えない。
+
+    ユニバース全体を分母にすると、取りこぼしが無くても低い値が出て
+    警告が鳴りっぱなしになる。
+    """
     universe.execute("DELETE FROM market_metrics WHERE ticker = 'CCC'")
     report = screen(universe, criteria)
-    assert report.price_coverage == pytest.approx(2 / 3)
+    assert [item.candidate.ticker for item in report.price_targets] == ["AAA", "BBB"]
+    assert report.price_coverage == 1.0
+
+
+def test_price_coverage_detects_a_real_miss(
+    universe: duckdb.DuckDBPyConnection, criteria: Criteria
+) -> None:
+    """足切りを通ったのに株価が無い銘柄は取りこぼし。"""
+    universe.execute("DELETE FROM market_metrics WHERE ticker = 'BBB'")
+    report = screen(universe, criteria)
+    assert report.price_coverage == pytest.approx(0.5)
+
+
+def test_funnel_ignores_price_checks_for_fundamentals_failures(
+    universe: duckdb.DuckDBPyConnection, criteria: Criteria
+) -> None:
+    """財務で落ちた CCC は、株価条件を内訳に持ち込まない。"""
+    blocked = screen(universe, criteria).blocked_counts()
+    assert blocked["track_a.revenue_cagr_3y"]["fail"] == 1
+    assert not any(
+        name.endswith(("market_cap", "avg_daily_value", "pbr", "psr")) for name in blocked
+    )
+
+
+def test_decidable_counts_only_fundamentals(
+    universe: duckdb.DuckDBPyConnection, criteria: Criteria
+) -> None:
+    """判定できた割合に株価条件を混ぜない。
+
+    混ぜると「株価を取りに行かなかった銘柄はすべて判定不能」になり、
+    財務データの質とは無関係に数字が動く（docs/xbrl-findings.md の E と比較できなくなる）。
+    """
+    universe.execute("DELETE FROM market_metrics")
+    with_prices = screen(universe, criteria, with_price=False)
+    without_prices = screen(universe, criteria, with_price=True)
+    for track in Track:
+        assert with_prices.decidable(track) == without_prices.decidable(track)
+
+
+def test_funnel_keeps_price_checks_for_real_misses(
+    universe: duckdb.DuckDBPyConnection, criteria: Criteria
+) -> None:
+    """足切りを通ったのに株価が無い銘柄は、株価条件で落ちたとして残す。"""
+    universe.execute("DELETE FROM market_metrics")
+    blocked = screen(universe, criteria).blocked_counts()
+    assert blocked["common.market_cap"]["unknown"] == 2
 
 
 def test_multi_class_shares_one_fundamentals_row(

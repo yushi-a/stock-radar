@@ -55,6 +55,8 @@ def evaluate(candidate: Candidate, criteria: Criteria, *, with_price: bool = Tru
         ebit_discipline(metrics, criteria),
     ]
     if with_price:
-        checks.append(check("track_a.fcf_yield", candidate.fcf_yield, track.fcf_yield))
-        checks.append(check("track_a.pbr", candidate.pbr, track.pbr))
+        checks.append(
+            check("track_a.fcf_yield", candidate.fcf_yield, track.fcf_yield, needs_price=True)
+        )
+        checks.append(check("track_a.pbr", candidate.pbr, track.pbr, needs_price=True))
     return checks
