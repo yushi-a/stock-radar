@@ -246,7 +246,13 @@ Phase 2a で決めたルールを実装する。
 - `activeDeadlineSeconds` は時間予算 + 余裕、`backoffLimit` は低め
 - `criteria.yaml` / `runtime.yaml` の ConfigMap は**既定で作らない**。値を渡したときだけ
   その1ファイルを `subPath` で差し替える。イメージの外に第2の正本を作らないため
-- namespace は新規に `stock-radar` を切る。**イメージが public なので registry-secret は不要**
+- namespace は新規に **`stock`** を切る（2026-09-22 決定）。既存が `web` / `notification` /
+  `monitoring` と役割を表す語なのに合わせた。日本株版や Kill 条件の監視など、後から増える
+  株式まわりのワークロードを同じ ns に置ける。`createNamespace: true` で `apply` 時に作られる
+- **イメージが public なので registry-secret は不要**
+- **namespace にラベルを付けなくても Istio のサイドカーは入る。** クラスタの injector は
+  「`istio-injection` も `istio.io/rev` も無い namespace ＋ Pod ラベル `sidecar.istio.io/inject: "true"`」
+  で発火する webhook を持っている。`PeerAuthentication` は未設定（mTLS は PERMISSIVE）
 - ~~**SOPS の secret は不要の見込み。**~~ → **使うことにした（2026-09-21）。**
   notificator に認証が無いのは変わらないが、`SEC_USER_AGENT` は連絡先（メールアドレス）であり、
   平文でリポジトリに残さない方針（`CLAUDE.md`）を優先した。private リポジトリでも履歴には残る
@@ -274,7 +280,7 @@ Phase 2a で決めたルールを実装する。
 `helmfile -f stock-radar.yaml diff` → `apply` の後、手動トリガーで確認する。
 
 ```bash
-kubectl create job --from=cronjob/stock-radar stock-radar-manual-1 -n stock-radar
+kubectl create job --from=cronjob/stock-radar stock-radar-manual-1 -n stock
 ```
 
 | 確認項目 | 見るもの |
