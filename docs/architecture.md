@@ -322,7 +322,7 @@ run が終わったかどうか、`price_coverage` がいくつかも同じ2テ�
 
 ```yaml
 prices:
-  window_days: 315            # 取得ウィンドウ（52週 + 余裕）
+  window_days: 315            # 取得ウィンドウ。**営業日**（52週 ≒ 252営業日 + 余裕）
   overlap_days: 5             # 遡及調整の検知に使う重複日数
 
   throttle:

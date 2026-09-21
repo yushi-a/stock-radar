@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import math
 import random
 import time
 from collections.abc import Callable, Iterable, Sequence
@@ -36,6 +37,7 @@ if TYPE_CHECKING:
     import duckdb
 
 __all__ = [
+    "HOLIDAY_BUFFER_DAYS",
     "SPLIT_TOLERANCE",
     "FetchOutcome",
     "FetchReport",
@@ -43,6 +45,7 @@ __all__ = [
     "needs_full_refetch",
     "select_targets",
     "start_date_for",
+    "window_start",
 ]
 
 log = logging.getLogger(__name__)
@@ -50,6 +53,9 @@ log = logging.getLogger(__name__)
 # 重複期間の終値がこの割合を超えてずれていたら、遡及調整が入ったとみなす。
 # 株式分割は2倍以上動くので、丸め誤差（1e-6 程度）とは桁が違う。
 SPLIT_TOLERANCE = 0.001
+
+# 営業日を暦日に直すときの祝日ぶんの余裕。米国市場の休場は年9〜10日。
+HOLIDAY_BUFFER_DAYS = 14
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +90,16 @@ class FetchReport:
         if self.targets == 0:
             return None
         return self.succeeded / self.targets
+
+
+def window_start(today: dt.date, business_days: int) -> dt.date:
+    """``business_days`` 営業日ぶんさかのぼった暦日。
+
+    **`window_days` は営業日**（docs/architecture.md「日次1年3ヶ月分（315営業日）」）。
+    これを暦日として引くと 315日 ≒ 45週にしかならず、**52週高安が計算できない**。
+    週5営業日なので 7/5 倍し、祝日ぶんの余裕を足す。
+    """
+    return today - dt.timedelta(days=math.ceil(business_days * 7 / 5) + HOLIDAY_BUFFER_DAYS)
 
 
 # --- 対象の決め方 -----------------------------------------------------------
@@ -152,7 +168,7 @@ def start_date_for(
     ).fetchone()
     if row is None:
         # 履歴が無い、または重複ぶんに足りない。ウィンドウ全体を取る。
-        return today - dt.timedelta(days=runtime.window_days), True
+        return window_start(today, runtime.window_days), True
     return row[0], False
 
 
@@ -282,7 +298,7 @@ def _fetch_one(
             log.info("%s は遡及調整が入っている。フル再取得する", ticker)
             full = True
             split_refetch = True
-            start = today - dt.timedelta(days=runtime.window_days)
+            start = window_start(today, runtime.window_days)
             try:
                 bars = source.fetch(ticker, start, today)
             except PriceFetchError as exc:
