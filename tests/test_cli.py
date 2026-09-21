@@ -8,8 +8,19 @@ from pathlib import Path
 
 import pytest
 
+from stock_radar import cli
 from stock_radar.cli import build_parser, submissions_is_fresh
-from stock_radar.config import Market
+from stock_radar.config import Criteria, Market, Runtime, load_criteria, load_runtime
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _runtime() -> Runtime:
+    return load_runtime(REPO_ROOT / "config" / "runtime.yaml")
+
+
+def _criteria() -> Criteria:
+    return load_criteria(REPO_ROOT / "config" / "criteria.yaml")
 
 
 def test_defaults_to_the_us_market() -> None:
@@ -67,3 +78,56 @@ def test_old_file_is_not_fresh(tmp_path: Path) -> None:
 
 def test_zero_max_age_always_refetches(tmp_path: Path) -> None:
     assert submissions_is_fresh(_with_mtime(tmp_path, dt.timedelta(minutes=1)), 0) is False
+
+
+# --- run（全工程を一息で回す） ----------------------------------------------
+
+
+def test_run_takes_the_price_scoping_options() -> None:
+    args = build_parser().parse_args(["run", "--limit", "10", "--no-notify"])
+    assert (args.limit, args.tickers, args.no_notify) == (10, None, True)
+
+
+def test_run_stops_at_the_first_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """半端なデータで候補を出さない。失敗したら後続を呼ばない。"""
+    called: list[str] = []
+
+    def ok(name: str) -> object:
+        def step(*args: object, **kwargs: object) -> int:
+            called.append(name)
+            return 0
+
+        return step
+
+    def fails(*args: object, **kwargs: object) -> int:
+        called.append("facts")
+        return 1
+
+    monkeypatch.setattr(cli, "fetch_universe", ok("universe"))
+    monkeypatch.setattr(cli, "fetch_facts", fails)
+    monkeypatch.setattr(cli, "fetch_prices_command", ok("prices"))
+    monkeypatch.setattr(cli, "screen_command", ok("screen"))
+
+    code = cli.run_all(_runtime(), _criteria(), Path("x.duckdb"), Market.US)
+    assert code == 1
+    assert called == ["universe", "facts"]
+
+
+def test_run_keeps_the_pipeline_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    """株価取得は必ず財務の足切りの後（CLAUDE.md）。"""
+    called: list[str] = []
+
+    for name in ("fetch_universe", "fetch_facts", "fetch_prices_command", "screen_command"):
+        monkeypatch.setattr(
+            cli,
+            name,
+            lambda *args, _name=name, **kwargs: (called.append(_name), 0)[1],
+        )
+
+    assert cli.run_all(_runtime(), _criteria(), Path("x.duckdb"), Market.US) == 0
+    assert called == [
+        "fetch_universe",
+        "fetch_facts",
+        "fetch_prices_command",
+        "screen_command",
+    ]

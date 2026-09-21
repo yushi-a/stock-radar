@@ -193,6 +193,8 @@ Phase 2a で決めたルールを実装する。
   - 通知は Phase 5 の最後に回す。CSV 出力までが動けば運用は始められるため、ここをブロッカーにしない
 - CLI：`stock-radar run --market us --criteria config/criteria.yaml --runtime config/runtime.yaml`
   フェーズ単位でも実行できるようにする（`fetch-universe` / `fetch-facts` / `fetch-prices` / `screen`）
+  - `run` は上の4つを順に呼ぶだけ。**順序はパイプラインそのままで崩さない**（株価は財務の足切りの後）
+  - 途中で失敗したらそこで止めて非ゼロを返す。半端なデータで候補を出さない
 - `companyfacts.zip` はパース後に古い世代を削除する（最新1世代のみ保持）
 
 ## Phase 6：コンテナ化とデプロイ
