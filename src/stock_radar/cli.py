@@ -1,7 +1,10 @@
 """コマンドラインの入口。
 
-第一弾の本格的な CLI は Phase 5。ここにあるのは Phase 1 の検証を実行するための
-最小限のサブコマンドだけ。
+フェーズ単位で実行できるサブコマンドを並べてある（`fetch-universe` / `fetch-facts` /
+`fetch-prices` / `screen`）。全体を一息で回す `run` は Phase 5。
+
+各サブコマンドが表示する数字は、実装計画の「検証」に当たる目視確認の材料
+（除外理由別の件数、指標の取得率、通過件数と落ちた条件の内訳）。
 """
 
 from __future__ import annotations
@@ -15,12 +18,22 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from stock_radar.config import (
+    DEFAULT_CRITERIA_PATH,
     DEFAULT_RUNTIME_PATH,
+    Criteria,
     Market,
     Runtime,
+    load_criteria,
     load_runtime,
 )
 from stock_radar.metrics.market import rebuild_market_metrics
+from stock_radar.screen.evaluate import Track
+from stock_radar.screen.runner import (
+    prescreen_tickers,
+    screen,
+    store_run,
+    warn_on_quality,
+)
 from stock_radar.sources.prices.fetcher import fetch_prices
 from stock_radar.sources.prices.yfinance_client import YFinanceSource
 from stock_radar.sources.sec.client import SecClient
@@ -53,6 +66,7 @@ log = logging.getLogger("stock_radar")
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="stock-radar", description=__doc__)
     parser.add_argument("--runtime", type=Path, default=DEFAULT_RUNTIME_PATH)
+    parser.add_argument("--criteria", type=Path, default=DEFAULT_CRITERIA_PATH)
     parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
     parser.add_argument("--market", type=Market, choices=list(Market), default=Market.US)
 
@@ -82,6 +96,21 @@ def build_parser() -> argparse.ArgumentParser:
     # 全銘柄の実行はデプロイ後に環境上で行う。それまではここで絞る。
     prices.add_argument("--limit", type=int, help="先頭 N 銘柄だけ取得する")
     prices.add_argument("--tickers", help="銘柄を直接指定する（カンマ区切り。例: AAPL,MSFT）")
+
+    screen_cmd = sub.add_parser(
+        "screen", help="criteria.yaml の条件を当てて screen_runs / screen_results を書く"
+    )
+    screen_cmd.add_argument(
+        "--no-price-filters",
+        action="store_true",
+        help=(
+            "株価が要る条件（時価総額・売買代金・PBR・PSR・FCF利回り）を飛ばす。"
+            "株価が揃う前に財務側だけを測るためのモード"
+        ),
+    )
+    screen_cmd.add_argument(
+        "--dry-run", action="store_true", help="判定して表示するだけで DB に書かない"
+    )
     return parser
 
 
@@ -198,14 +227,29 @@ def fetch_facts(runtime: Runtime, db_path: Path, market: Market, *, force: bool)
 
 def fetch_prices_command(
     runtime: Runtime,
+    criteria: Criteria,
     db_path: Path,
     market: Market,
     *,
     limit: int | None,
     tickers: str | None,
 ) -> int:
-    names = [t for t in (tickers or "").split(",") if t.strip()] or None
+    explicit = [t for t in (tickers or "").split(",") if t.strip()] or None
     with open_database(db_path) as con:
+        names = explicit
+        if names is None:
+            # CLAUDE.md:「株価取得は必ず財務による足切りの後に実行する。
+            # 先に対象を半減させることが 429 対策の中核になっている」
+            if not con.execute("SELECT count(*) FROM fundamentals").fetchone()[0]:
+                log.error("fundamentals が空。先に fetch-facts を実行する")
+                return 1
+            names = prescreen_tickers(con, criteria, market=market)
+            log.info("財務による足切りを通った %s 銘柄を対象にする", f"{len(names):,}")
+            if not names:
+                log.error("足切りを通った銘柄が無い。条件か財務データを確認する")
+                return 1
+        else:
+            log.info("銘柄が明示されたので財務による足切りを通さない")
         report = fetch_prices(
             con,
             YFinanceSource(),
@@ -255,6 +299,72 @@ def fetch_prices_command(
     return 0
 
 
+def screen_command(
+    runtime: Runtime,
+    criteria: Criteria,
+    db_path: Path,
+    market: Market,
+    *,
+    with_price: bool,
+    dry_run: bool,
+) -> int:
+    with open_database(db_path) as con:
+        report = screen(con, criteria, market=market, with_price=with_price)
+        if not report.evaluated:
+            log.error("判定できる銘柄が無い。先に fetch-universe / fetch-facts を実行する")
+            return 1
+
+        label = "全条件" if with_price else "株価が要らない条件だけ"
+        print(f"\n=== スクリーニング（{market.value} / {label}）===")
+        print(f"{'ユニバース':<26} {report.universe_size:>7,} 銘柄")
+        print(f"{'うち財務データ無しで除外':<26} {report.missing_fundamentals:>7,}")
+        print(f"{'判定した銘柄':<26} {report.evaluated:>7,}")
+        for track, count in report.track_counts.items():
+            print(f"{'通過（トラック' + track + '）':<26} {count:>7,}")
+        print(f"{'通過（実数）':<26} {len(report.passed):>7,}")
+        if report.price_coverage is not None:
+            print(f"{'price_coverage':<26} {report.price_coverage:>7.1%}")
+            if with_price and report.price_coverage < runtime.prices.coverage_warn_threshold:
+                log.warning(
+                    "price_coverage が閾値 %.0f%% を下回った。"
+                    "候補が少ないのは相場ではなく取りこぼしの可能性がある",
+                    runtime.prices.coverage_warn_threshold * 100,
+                )
+
+        # 判定できた割合。docs/xbrl-findings.md の E と同じ定義で、データ側の回帰に気づくため。
+        print("\n=== トラックを判定できた割合 ===")
+        for track in Track:
+            count = report.decidable(track)
+            print(f"{'トラック' + track.value:<26} {count:>7,} = {count / report.evaluated:6.1%}")
+
+        # 通過件数だけでは閾値をどちらに動かせばよいか分からない。
+        # 閾値未満（緩めれば増える）と判定不能（緩めても増えない）を分けて出す。
+        print("\n=== 落とした条件の内訳（延べ。閾値未満 / 判定不能）===")
+        blocked = report.blocked_counts()
+        for name, counts in sorted(blocked.items(), key=lambda kv: -sum(kv[1].values())):
+            print(f"{name:<42} {counts['fail']:>7,} / {counts['unknown']:>7,}")
+
+        for message in warn_on_quality(report):
+            log.warning("データ品質: %s", message)
+
+        if report.passed:
+            print("\n=== 上位候補（タイミング加点順）===")
+            for item in report.passed[: runtime.notify.top_n]:
+                candidate = item.candidate
+                score = "-" if item.timing_score is None else f"{item.timing_score:.0f}"
+                print(
+                    f"{candidate.ticker:<8} {(candidate.name or '')[:28]:<30} "
+                    f"トラック{item.track} 加点 {score}"
+                )
+
+        if dry_run:
+            log.info("dry-run なので screen_runs / screen_results には書かない")
+            return 0
+        run_id = store_run(con, report, criteria)
+        log.info("run_id=%s として記録した（通過 %s 件）", run_id, f"{len(report.passed):,}")
+    return 0
+
+
 def _report(con: duckdb.DuckDBPyConnection, market: Market) -> None:
     """Phase 1 の検証項目：除外理由別の件数と残存社数。"""
     counts = exclusion_counts(con, market=market)
@@ -282,7 +392,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         return fetch_facts(runtime, args.db, args.market, force=args.force_download)
     if args.command == "fetch-prices":
         return fetch_prices_command(
-            runtime, args.db, args.market, limit=args.limit, tickers=args.tickers
+            runtime,
+            load_criteria(args.criteria),
+            args.db,
+            args.market,
+            limit=args.limit,
+            tickers=args.tickers,
+        )
+    if args.command == "screen":
+        return screen_command(
+            runtime,
+            load_criteria(args.criteria),
+            args.db,
+            args.market,
+            with_price=not args.no_price_filters,
+            dry_run=args.dry_run,
         )
     raise AssertionError(f"未知のサブコマンド: {args.command}")
 

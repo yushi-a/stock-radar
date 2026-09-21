@@ -123,6 +123,11 @@ def select_targets(
 
     ``limit`` / ``tickers`` で外から絞れる。**全銘柄の実行はデプロイ後**に行うため、
     それまではここで少数に絞って試す。
+
+    ``tickers`` には CLI が**財務による足切りを通った銘柄**を渡す
+    （`screen.runner.prescreen_tickers`）。CLAUDE.md の「株価取得は必ず財務による
+    足切りの後に実行する。先に対象を半減させることが 429 対策の中核になっている」。
+    手動スモークで銘柄を明示したときは、足切りを通さずそのまま使う。
     """
     fresh_since = today - dt.timedelta(days=runtime.up_to_date_within_days)
     rows = con.execute(

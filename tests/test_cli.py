@@ -1,4 +1,4 @@
-"""CLI。Phase 1 の検証を実行するための最小限のサブコマンドだけがある。"""
+"""CLI。引数の組み立てと、ファイルを使い回す判断だけを見る。"""
 
 from __future__ import annotations
 
@@ -20,7 +20,20 @@ def test_defaults_to_the_us_market() -> None:
 
 def test_rejects_an_unknown_subcommand() -> None:
     with pytest.raises(SystemExit):
-        build_parser().parse_args(["screen"])
+        build_parser().parse_args(["backtest"])
+
+
+def test_screen_applies_price_filters_by_default() -> None:
+    args = build_parser().parse_args(["screen"])
+    assert args.no_price_filters is False
+    assert args.dry_run is False
+
+
+def test_screen_can_skip_price_filters() -> None:
+    """株価が揃う前に財務側だけ測るモード（ゲート G3 の実測に使う）。"""
+    args = build_parser().parse_args(["screen", "--no-price-filters", "--dry-run"])
+    assert args.no_price_filters is True
+    assert args.dry_run is True
 
 
 def test_requires_a_subcommand() -> None:
