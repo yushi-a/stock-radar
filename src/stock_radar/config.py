@@ -278,6 +278,9 @@ class PricesRuntime(_Model):
     window_days: int = Field(gt=0)
     # 遡及調整（株式分割）の検知に使う重複日数。
     overlap_days: int = Field(ge=0)
+    # これより新しい株価が手元にあれば、その銘柄は取得し直さない。
+    # 週末・祝日をまたぐので数日の余裕を持たせる。
+    up_to_date_within_days: int = Field(ge=0)
     throttle: ThrottleRuntime
     circuit_breaker: CircuitBreakerRuntime
     budget: BudgetRuntime
