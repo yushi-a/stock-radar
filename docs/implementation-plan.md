@@ -240,7 +240,7 @@ kubectl create job --from=cronjob/stock-radar stock-radar-manual-1 -n <ns>
 |---|---|
 | 少数銘柄での疎通 | `--limit 10` 相当で一周する |
 | **Job が Complete になる** | Istio サイドカーが落ちているか。ここが最も踏みやすい |
-| 全銘柄での完走 | 丸1日走らせて最後まで行くか。429 の実挙動もここで分かる |
+| 全銘柄での完走 | 最後まで行くか。**ローカルでは足切り後 243 銘柄を18分で完走（2026-09-21 実測、429 は0件）**。クラスタ上でも同程度で終わるはず |
 | PVC の永続 | 2回目の実行が差分で走るか |
 | リソース実測 | メモリ・ディスクを測り、`resources` の limits を確定する |
 | notificator への通知 | Connect の JSON POST が通り、LINE に届くか。`curl` 1回で確認できる |
