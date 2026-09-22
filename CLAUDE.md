@@ -9,15 +9,20 @@
 
 ## 現在地
 
-**Phase 0 完了。** 米国株版から実装している。進捗と決定ログは [issue #1](https://github.com/yushi-a/stock-radar/issues/1)。
-次にやることは `docs/implementation-plan.md` の Phase 1（ユニバース確定）から。
+**第一弾（米国株）完了。2026-09-22 にクラスタで稼働を開始した。**
+経緯と決定ログは [issue #1](https://github.com/yushi-a/stock-radar/issues/1)（クローズ済み）。
 
-入っているもの：uv / ruff / pytest（`pytest-socket` でソケット遮断）/ GitHub Actions CI、
-`config.py` と `config/criteria.yaml` `config/runtime.yaml`、`storage.py`（DuckDB スキーマ）。
+- `uv run stock-radar run` でユニバース → 財務 → 株価 → スクリーニング → CSV → 通知まで一息で回る
+- クラスタでは毎週土曜08:00 JST に `stock` namespace の CronJob が回る。
+  マニフェストは `yushi-a/helm` の `charts/stock-radar`
+- 実測：全銘柄20分、2回目以降の差分は2分30秒、メモリのピーク 778Mi、候補は21件前後
 
-Phase 2a（データ構造の実地調査）は、`companyfacts` の実データを見て正規化ルールを決めるフェーズ。
-成果物はコードではなく調査ノートと決定事項で、ここの結論次第では
-**スクリーニング条件そのものの見直しをユーザーと再合意する**。
+**次に手を付けるときは、まず開いている issue を見る。** 判明している宿題：
+
+- [#48](https://github.com/yushi-a/stock-radar/issues/48) CSV の取り出し方。
+  いまは PVC に置くだけで、参照するのに `sudo` が要る
+- local PVC のバックアップ方法（`docs/open-questions.md`）
+- 日本株対応、Kill 条件監視、フィードバック記録（いずれも第一弾より後と合意済み）
 
 ## 作業前に必ず読むもの
 
