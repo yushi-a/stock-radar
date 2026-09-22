@@ -5,7 +5,8 @@
 
 ## ステータス
 
-- 設計完了。**Phase 1（ユニバース確定）まで実装済み**（2026-09-20時点）。進捗は [issue #1](https://github.com/yushi-a/stock-radar/issues/1)。
+- **第一弾（米国株）完了**。2026-09-22 からクラスタで週次稼働している。経緯は [issue #1](https://github.com/yushi-a/stock-radar/issues/1)。
+- 毎週土曜08:00 JST に CronJob が回り、CSV を出して要約を LINE に通知する。全銘柄で約20分。
 - **初回対象は米国株**（SEC EDGAR + yfinance で完全無料）。日本株は第一弾より後。
 - システム構成は合意済み：Python + uv / DuckDB 単一ファイル / まずローカル CLI、安定後に K3s CronJob（クラスタ `yuxsr-dev`） / 出力は CSV + 通知（notificator）。
 - 実装計画は [docs/implementation-plan.md](docs/implementation-plan.md)。
