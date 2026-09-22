@@ -455,6 +455,35 @@ def drop_rebuildable(con: duckdb.DuckDBPyConnection) -> None:
         con.execute(f"DROP TABLE IF EXISTS {table}")
 
 
+def _copy_into_target(con: duckdb.DuckDBPyConnection) -> None:
+    """アタッチ済みの source を target に写す。
+
+    **`COPY FROM DATABASE` は使えない。** テーブルを外部キーの順に並べてくれず、
+    `screen_results` を `screen_runs` より先に写して FK 違反で落ちる。
+    スクリーニングを1回でも実行した後の DB では必ず再現する（issue #49）。
+    親から順に自分で INSERT する。
+    """
+    # run_id はシーケンスで採番する。作り直したファイルで 1 に戻ると既存行と衝突するので、
+    # スキーマを作る前に続きの番号で作っておく（DDL 側は IF NOT EXISTS なので触られない）。
+    next_run_id = con.execute(
+        "SELECT coalesce(max(run_id), 0) + 1 FROM source.screen_runs"
+    ).fetchone()[0]
+    con.execute("USE target")
+    con.execute(f"CREATE SEQUENCE screen_run_id_seq START {next_run_id}")
+    apply_schema(con)
+    # バージョンは source のものを引き継ぐ。作り直しで勝手に上げない。
+    con.execute(
+        "INSERT INTO schema_meta SELECT * FROM source.schema_meta "
+        "ON CONFLICT (key) DO UPDATE SET value = excluded.value"
+    )
+    # ALL_TABLES は親 → 子の順に並べてある（screen_runs が screen_results より前）。
+    # 参照を持つテーブルを足すときは、この順序を崩さないこと。
+    for table in ALL_TABLES:
+        con.execute(f"INSERT INTO {table} SELECT * FROM source.{table}")
+    # 既定のカタログのままでは target を DETACH できない。
+    con.execute("USE memory")
+
+
 def compact(path: Path | str = DEFAULT_DB_PATH) -> tuple[int, int]:
     """DuckDB ファイルを作り直して縮める。元のサイズと後のサイズを返す。
 
@@ -464,6 +493,8 @@ def compact(path: Path | str = DEFAULT_DB_PATH) -> tuple[int, int]:
 
     `facts_annual` / `facts_quarterly` は週次で125万行を丸ごと入れ替えるため、
     これをやらないと1回あたり約25MB 増え続ける。
+
+    写し方は `_copy_into_target` を参照。`COPY FROM DATABASE` は外部キーで落ちる。
 
     書き上がるまで元のファイルには触らない。途中で落ちても壊れない。
     """
@@ -477,7 +508,7 @@ def compact(path: Path | str = DEFAULT_DB_PATH) -> tuple[int, int]:
     try:
         con.execute(f"ATTACH '{path}' AS source (READ_ONLY)")
         con.execute(f"ATTACH '{target}' AS target")
-        con.execute("COPY FROM DATABASE source TO target")
+        _copy_into_target(con)
         con.execute("DETACH target")
         con.execute("DETACH source")
     except duckdb.Error as exc:
