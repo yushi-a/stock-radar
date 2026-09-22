@@ -21,7 +21,14 @@ Go と TypeScript しか生成しておらず、gRPC で話そうとすると自
 ## 送れるのは短い文字列1つだけ
 
 `NotifyRequest` のフィールドは `message`（string）のみで、バックエンドは LINE Bot の
-push message。**候補リスト全体は送らない。**CSV は PVC 上に置いてパスだけ載せる。
+push message。CSV は添付できないので PVC 上に置いてパスだけ載せる。
+
+## 候補は「全件載せるか、1件も載せないか」
+
+上位N件だけを載せると、その順序が評価の順位に見える。実際の順序はタイミング加点
+（`screen/timing.py`）であって銘柄の優劣ではないので、切り取ると意味の無い序列を
+伝えてしまう。だから `notify.max_listed` 以下なら全件、超えたら一覧ごと省略して
+「超えた」ことを明示し、CSV を見てもらう。
 
 ## 失敗しても run を落とさない
 
@@ -82,19 +89,18 @@ def summary_lines(
     *,
     run_at: dt.datetime,
     market: str,
-    universe_size: int,
     track_counts: dict[str, int],
     passed: Sequence[Evaluation],
     price_coverage: float | None,
     coverage_warn_threshold: float,
     csv_path: str | None,
-    top_n: int,
+    max_listed: int,
 ) -> list[str]:
     """通知に載せる行。**判断はしない**（スコアも期待倍率も出さない。CLAUDE.md）。"""
     tracks = " / ".join(f"{name}:{count}" for name, count in sorted(track_counts.items()))
     lines = [
         f"stock-radar {run_at:%Y-%m-%d} ({market})",
-        f"候補 {len(passed)}件（{tracks}）/ ユニバース {universe_size:,}",
+        f"候補 {len(passed)}件（{tracks}）",
     ]
     if price_coverage is not None:
         line = f"株価取得 {_percent(price_coverage)}"
@@ -102,12 +108,18 @@ def summary_lines(
             # これが無いと「候補が少ない」のが相場のせいか取りこぼしのせいか受け手に分からない。
             line += " ⚠️取りこぼしの可能性"
         lines.append(line)
-    if passed and top_n:
-        lines.append("上位:")
-        for item in passed[:top_n]:
-            candidate = item.candidate
-            track = item.track.value if item.track is not None else "-"
-            lines.append(f"  {candidate.ticker} ({track}) {(candidate.name or '')[:20]}")
+    if passed:
+        if len(passed) <= max_listed:
+            # 見出しで並び順を明示する。「上位」と書くと評価の順位に読めるが、
+            # 実際はタイミング加点（screen/timing.py）の順であって優劣ではない。
+            lines.append("タイミング加点順:")
+            for item in passed:
+                candidate = item.candidate
+                track = item.track.value if item.track is not None else "-"
+                lines.append(f"  {candidate.ticker} ({track}) {(candidate.name or '')[:20]}")
+        else:
+            # 一部だけ載せると切り取った順序が序列に見える。省略したことを明示して CSV に送る。
+            lines.append(f"一覧は省略（上限 {max_listed}件 を超過）。CSV を参照")
     if csv_path:
         lines.append(f"CSV: {csv_path}")
     return lines
@@ -117,19 +129,26 @@ def build_message(lines: Sequence[str], *, max_chars: int) -> str:
     """行をつないで、上限に収める。
 
     LINE のテキストは5,000文字が上限だが、実用上は数百文字（`notify.max_message_chars`）。
-    **切るのは末尾から行単位で。** 途中で文字を切ると「上位:」の途中で終わったり、
-    CSV のパスが欠けたりする。
+    **切るのは行単位で。** 途中で文字を切ると「タイミング加点順:」の途中で終わる。
+
+    落とすのは**真ん中から**。先頭行（実行日と市場）と最終行は残す。一覧を省略したときの
+    CSV パスが通知の主役になるので、末尾から素直に落とすと真っ先にそれを捨ててしまう。
+    max_listed を上げれば候補行が伸びて上限に届きうるので、届いたときに何が残るかを
+    ここで決めておく。
     """
     message = "\n".join(lines)
     if len(message) <= max_chars:
         return message
-    kept = list(lines)
-    while kept and len("\n".join([*kept, "…"])) > max_chars:
-        kept.pop()
-    if not kept:
-        # 1行目すら入らない設定。そのときは素直に文字で切る。
+    if len(lines) <= 2:
+        # 先頭と最終しか無いなら落とす余地が無い。素直に文字で切る。
         return message[:max_chars]
-    return "\n".join([*kept, "…"])
+    first, last = lines[0], lines[-1]
+    middle = list(lines[1:-1])
+    while middle and len("\n".join([first, *middle, "…", last])) > max_chars:
+        middle.pop()
+    kept = "\n".join([first, *middle, "…", last])
+    # 先頭・省略記号・最終行だけでも入らない設定。そのときは素直に文字で切る。
+    return kept if len(kept) <= max_chars else message[:max_chars]
 
 
 def notify(message: str, runtime: NotifyRuntime, *, poster: Poster) -> NotifyResult:

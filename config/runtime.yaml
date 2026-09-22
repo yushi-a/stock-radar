@@ -75,8 +75,10 @@ notify:
   # Connect プロトコルの unary + JSON。grpcio も proto のコード生成も不要。
   path: /yuxsr.notification.v1.NotificatorService/Notify
   timeout_sec: 10
-  # バックエンドが LINE Bot の push message（5,000文字上限）のため、
-  # 候補リスト全体は送らず要約に絞る。CSV は PVC 上に置いてパスだけ載せる。
+  # バックエンドが LINE Bot の push message（5,000文字上限）のため、実用上は数百文字に
+  # 収める。CSV は添付できないので PVC 上に置いてパスだけ載せる。
   max_message_chars: 900
-  # 通知に載せる上位銘柄の数。
-  top_n: 5
+  # 候補一覧を通知に載せる上限。**これ以下なら全件載せ、超えたら一覧ごと省略する。**
+  # 上位N件だけを載せると、その順序（タイミング加点順）が評価の順位に見えてしまうため。
+  # 20件は実測の候補数（21件前後）とほぼ同じで、社名込みでも900文字に収まる件数。
+  max_listed: 20

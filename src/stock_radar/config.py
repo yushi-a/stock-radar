@@ -298,7 +298,8 @@ class NotifyRuntime(_Model):
     timeout_sec: float = Field(gt=0)
     # LINE のテキストメッセージは5,000文字が上限。実用上は数百文字に収める。
     max_message_chars: int = Field(gt=0, le=5000)
-    top_n: int = Field(ge=0)
+    # 候補がこの件数以下なら全件載せ、超えたら一覧ごと省略する（output/notify.py）。
+    max_listed: int = Field(ge=0)
 
 
 class Runtime(_Model):
