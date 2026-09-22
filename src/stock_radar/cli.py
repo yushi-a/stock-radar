@@ -447,6 +447,7 @@ def _notify(
     lines = summary_lines(
         run_at=moment,
         market=market.value,
+        universe_size=report.universe_size,
         track_counts=report.track_counts,
         passed=report.passed,
         price_coverage=report.price_coverage,

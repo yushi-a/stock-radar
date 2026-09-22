@@ -23,12 +23,14 @@ Go と TypeScript しか生成しておらず、gRPC で話そうとすると自
 `NotifyRequest` のフィールドは `message`（string）のみで、バックエンドは LINE Bot の
 push message。CSV は添付できないので PVC 上に置いてパスだけ載せる。
 
-## 候補は「全件載せるか、1件も載せないか」
+## 候補一覧は `max_listed` 件まで載せ、省略したら省略したと書く
 
-上位N件だけを載せると、その順序が評価の順位に見える。実際の順序はタイミング加点
-（`screen/timing.py`）であって銘柄の優劣ではないので、切り取ると意味の無い序列を
-伝えてしまう。だから `notify.max_listed` 以下なら全件、超えたら一覧ごと省略して
-「超えた」ことを明示し、CSV を見てもらう。
+LINE に流せる長さの都合で全件は載らないことがある。`notify.max_listed` 件までを載せ、
+**あふれた分は「省略した」と1行書いてから落とす。** 黙って切ると、届いた一覧が候補の
+全部だと読めてしまう。
+
+見出しは「上位」ではなく「タイミング加点順」。並びはタイミング加点（`screen/timing.py`）
+の順であって銘柄の優劣ではないので、順位として読ませない。
 
 ## 失敗しても run を落とさない
 
@@ -89,6 +91,7 @@ def summary_lines(
     *,
     run_at: dt.datetime,
     market: str,
+    universe_size: int,
     track_counts: dict[str, int],
     passed: Sequence[Evaluation],
     price_coverage: float | None,
@@ -100,7 +103,7 @@ def summary_lines(
     tracks = " / ".join(f"{name}:{count}" for name, count in sorted(track_counts.items()))
     lines = [
         f"stock-radar {run_at:%Y-%m-%d} ({market})",
-        f"候補 {len(passed)}件（{tracks}）",
+        f"候補 {len(passed)}件（{tracks}）/ {universe_size:,}銘柄中",
     ]
     if price_coverage is not None:
         line = f"株価取得 {_percent(price_coverage)}"
@@ -109,17 +112,19 @@ def summary_lines(
             line += " ⚠️取りこぼしの可能性"
         lines.append(line)
     if passed:
-        if len(passed) <= max_listed:
+        listed = passed[:max_listed]
+        if listed:
             # 見出しで並び順を明示する。「上位」と書くと評価の順位に読めるが、
             # 実際はタイミング加点（screen/timing.py）の順であって優劣ではない。
             lines.append("タイミング加点順:")
-            for item in passed:
+            for item in listed:
                 candidate = item.candidate
                 track = item.track.value if item.track is not None else "-"
                 lines.append(f"  {candidate.ticker} ({track}) {(candidate.name or '')[:20]}")
-        else:
-            # 一部だけ載せると切り取った順序が序列に見える。省略したことを明示して CSV に送る。
-            lines.append(f"一覧は省略（上限 {max_listed}件 を超過）。CSV を参照")
+        omitted = len(passed) - len(listed)
+        if omitted > 0:
+            # 黙って切ると、届いた一覧が候補の全部だと読めてしまう。
+            lines.append(f"ほか{omitted}件は省略。CSV を参照")
     if csv_path:
         lines.append(f"CSV: {csv_path}")
     return lines
