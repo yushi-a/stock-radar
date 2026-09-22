@@ -350,6 +350,58 @@ def test_compact_shrinks_after_a_bulk_replace(tmp_path: Path) -> None:
         assert con.execute("SELECT count(*) FROM prices_daily").fetchone()[0] == 200_000
 
 
+def _with_a_screen_run(path: Path) -> None:
+    """スクリーニング結果が1件ある DB を作る（screen_results → screen_runs の参照つき）。"""
+    with open_database(path) as con:
+        con.execute(
+            "INSERT INTO screen_runs (run_at, market, criteria_snapshot) "
+            "VALUES (TIMESTAMP '2026-09-21 12:00:00', 'us', '{}')"
+        )
+        con.execute(
+            "INSERT INTO screen_results (run_id, market, ticker, track) "
+            "VALUES (1, 'us', 'AAPL', 'A')"
+        )
+
+
+def test_compact_keeps_the_screening_history(tmp_path: Path) -> None:
+    """外部キーのある行を持つ DB を作り直せること。
+
+    `COPY FROM DATABASE` はテーブルを外部キーの順に並べてくれず、`screen_results` を
+    `screen_runs` より先に写して落ちていた（issue #49）。スクリーニングを1回でも
+    実行した後は毎回踏むため、週次運用では2回目以降が必ず失敗していた。
+    """
+    from stock_radar.storage import compact
+
+    path = tmp_path / "stock_radar.duckdb"
+    _with_a_screen_run(path)
+
+    compact(path)
+
+    with open_database(path) as con:
+        assert con.execute("SELECT count(*) FROM screen_runs").fetchone()[0] == 1
+        assert con.execute("SELECT ticker FROM screen_results").fetchone()[0] == "AAPL"
+
+
+def test_compact_continues_the_run_id_sequence(tmp_path: Path) -> None:
+    """作り直した後の採番が続きから始まること。
+
+    1 に戻ると既存の run_id と主キーで衝突する。
+    """
+    from stock_radar.storage import compact
+
+    path = tmp_path / "stock_radar.duckdb"
+    _with_a_screen_run(path)
+
+    compact(path)
+
+    with open_database(path) as con:
+        run_id = con.execute(
+            "INSERT INTO screen_runs (run_at, market, criteria_snapshot) "
+            "VALUES (TIMESTAMP '2026-09-28 12:00:00', 'us', '{}') RETURNING run_id"
+        ).fetchone()[0]
+    assert run_id == 2
+
+
 def test_compact_leaves_the_original_alone_on_failure(tmp_path: Path) -> None:
     from stock_radar.storage import StorageError, compact
 
