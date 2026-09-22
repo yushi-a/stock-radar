@@ -50,7 +50,7 @@
 - **パイプラインの処理順を崩さない。** 株価取得（yfinance）は必ず財務による足切りの後に実行する。先に対象を半減させることが 429 対策の中核になっている。
 - **第一弾のスコープを広げない。** スクリーニング + CSV + 通知 + デプロイ（Phase 6）まで。Kill 条件監視・フィードバック記録・日本株対応は後回しと合意済み。
 - **マニフェストは別リポジトリ。** K8s 関連は `yushi-a/helm`（Helmfile + Helm + SOPS）で管理する。既存の `stock-notificator` チャートが最も近い前例。
-- **通知先 `notificator` は Connect プロトコルの JSON を素の HTTP POST で叩く**（`notificator.notification.svc.cluster.local:50051`）。`grpcio` や proto のコード生成は不要。バックエンドが LINE なので送れるのは**単一の短い文字列**で、候補リスト全体は送らない。
+- **通知先 `notificator` は Connect プロトコルの JSON を素の HTTP POST で叩く**（`notificator.notification.svc.cluster.local:50051`）。`grpcio` や proto のコード生成は不要。バックエンドが LINE なので送れるのは**単一の短い文字列**。候補一覧は `notify.max_listed`（20件）まで載せ、あふれた分は「ほかN件は省略」と書いてから落とす。一覧の見出しに「上位」は使わない（並びはタイミング加点順であって評価の順位ではない）。
 - **Istio サイドカーの終了処理を忘れない。** CronJob の command 末尾で `curl -X POST http://localhost:15020/quitquitquit` を呼ばないと Job が完了しない。
 - **一次情報優先。** 財務値は日本 = J-Quants、米国 = SEC EDGAR XBRL を正とする。yfinance / FMP の値は株価補完と照合用。
 - **スクリーナーで投資判断をしない。** 期待倍率・スコア・目標株価を算出しない。割安度は PBR / FCF 利回り / PSR 等の粗い指標まで。

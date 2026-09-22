@@ -385,8 +385,8 @@ def screen_command(
             log.warning("データ品質: %s", message)
 
         if report.passed:
-            print("\n=== 上位候補（タイミング加点順）===")
-            for item in report.passed[: runtime.notify.top_n]:
+            print("\n=== 候補（タイミング加点順）===")
+            for item in report.passed:
                 candidate = item.candidate
                 score = "-" if item.timing_score is None else f"{item.timing_score:.0f}"
                 print(
@@ -453,7 +453,7 @@ def _notify(
         price_coverage=report.price_coverage,
         coverage_warn_threshold=runtime.prices.coverage_warn_threshold,
         csv_path=str(csv_path) if csv_path else None,
-        top_n=runtime.notify.top_n,
+        max_listed=runtime.notify.max_listed,
     )
     message = build_message(lines, max_chars=runtime.notify.max_message_chars)
     result = notify(message, runtime.notify, poster=httpx_poster)

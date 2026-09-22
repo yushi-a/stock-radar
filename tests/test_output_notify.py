@@ -31,7 +31,7 @@ def runtime() -> NotifyRuntime:
         path="/yuxsr.notification.v1.NotificatorService/Notify",
         timeout_sec=10.0,
         max_message_chars=900,
-        top_n=5,
+        max_listed=20,
     )
 
 
@@ -61,7 +61,7 @@ def lines_for(criteria: Criteria, count: int = 2, **kwargs: object) -> list[str]
         "price_coverage": 1.0,
         "coverage_warn_threshold": 0.90,
         "csv_path": "output/2026-09-21_us.csv",
-        "top_n": 5,
+        "max_listed": 20,
     }
     defaults.update(kwargs)
     return summary_lines(**defaults)  # type: ignore[arg-type]
@@ -71,13 +71,27 @@ def lines_for(criteria: Criteria, count: int = 2, **kwargs: object) -> list[str]
 
 
 def test_summary_has_the_agreed_items(criteria: Criteria) -> None:
-    """実行日・ユニバース件数・トラック別通過数・株価取得率・上位銘柄・CSV パス。"""
+    """実行日・ユニバース件数・トラック別通過数・株価取得率・候補一覧・CSV パス。"""
     text = "\n".join(lines_for(criteria))
     assert "stock-radar 2026-09-21 (us)" in text
-    assert "候補 2件（A:8 / B:14）/ ユニバース 3,560" in text
+    assert "候補 2件（A:8 / B:14）/ 3,560銘柄中" in text
     assert "株価取得 100%" in text
     assert "AA0" in text
     assert "CSV: output/2026-09-21_us.csv" in text
+
+
+def test_summary_keeps_the_universe_count_without_the_word(criteria: Criteria) -> None:
+    """母数は残すが「ユニバース」という語は使わない。"""
+    text = "\n".join(lines_for(criteria))
+    assert "ユニバース" not in text
+    assert "3,560銘柄中" in text
+
+
+def test_the_list_is_not_labelled_as_a_ranking(criteria: Criteria) -> None:
+    """並び順はタイミング加点であって評価の順位ではない。「上位」と書かない。"""
+    text = "\n".join(lines_for(criteria))
+    assert "上位" not in text
+    assert "タイミング加点順:" in text
 
 
 def test_warns_when_price_coverage_is_low(criteria: Criteria) -> None:
@@ -91,28 +105,65 @@ def test_no_warning_at_the_threshold(criteria: Criteria) -> None:
     assert "⚠️" not in text
 
 
-def test_limits_the_listed_candidates(criteria: Criteria) -> None:
-    """候補リスト全体は送らない。LINE に流せる長さに収める。"""
-    text = "\n".join(lines_for(criteria, count=20, top_n=5))
-    assert text.count("  AA") == 5
+def test_lists_every_candidate_up_to_the_limit(criteria: Criteria) -> None:
+    """上限ちょうどなら全件載り、省略の断りは出ない。"""
+    text = "\n".join(lines_for(criteria, count=20, max_listed=20))
+    assert text.count("  AA") == 20
+    assert "省略" not in text
+
+
+def test_lists_the_limit_and_says_how_many_were_dropped(criteria: Criteria) -> None:
+    """あふれても上限分は載せる。**そして落とした件数を必ず書く。**"""
+    text = "\n".join(lines_for(criteria, count=23, max_listed=20))
+    assert text.count("  AA") == 20
+    assert "ほか3件は省略。CSV を参照" in text
+    # 総数と CSV のパスは残す。それが無いと受け手に打つ手が無い。
+    assert "候補 23件" in text
+    assert "CSV: output/2026-09-21_us.csv" in text
 
 
 def test_omits_the_list_when_nothing_passed(criteria: Criteria) -> None:
     text = "\n".join(lines_for(criteria, count=0))
-    assert "上位:" not in text
+    assert "タイミング加点順:" not in text
+    assert "省略" not in text
     assert "候補 0件" in text
+
+
+def test_no_empty_heading_when_the_limit_is_zero(criteria: Criteria) -> None:
+    """max_listed=0 は「一覧を出さない」設定。空の見出しを残さない。"""
+    text = "\n".join(lines_for(criteria, count=3, max_listed=0))
+    assert "タイミング加点順:" not in text
+    assert "ほか3件は省略。CSV を参照" in text
 
 
 # --- 文字数の上限 -----------------------------------------------------------
 
 
 def test_message_fits_in_the_limit(criteria: Criteria) -> None:
-    lines = lines_for(criteria, count=20, top_n=20)
+    lines = lines_for(criteria, count=20, max_listed=20)
     message = build_message(lines, max_chars=120)
     assert len(message) <= 120
-    # 行単位で落とす。途中で切ると「上位:」の途中で終わる。
-    assert message.endswith("…")
+    # 行単位で落とす。途中で切ると候補行の途中で終わる。
+    assert "…" in message
     assert message.splitlines()[0] == lines[0]
+
+
+def test_truncation_keeps_the_csv_path(criteria: Criteria) -> None:
+    """落とすのは真ん中から。CSV パスは一覧が入らなかったときの唯一の出口なので残す。"""
+    lines = lines_for(criteria, count=20, max_listed=20)
+    message = build_message(lines, max_chars=120)
+    assert message.endswith("CSV: output/2026-09-21_us.csv")
+
+
+def test_the_whole_list_fits_at_the_configured_limit(criteria: Criteria) -> None:
+    """上限20件＋省略の断り・社名込みで max_message_chars(900) に収まる。
+
+    ここが破れると build_message が行を落とし始める。運用値のまま切り詰めが
+    起きないことを固定しておく。
+    """
+    lines = lines_for(criteria, count=25, max_listed=20, price_coverage=0.5)
+    message = build_message(lines, max_chars=900)
+    assert message == "\n".join(lines)
 
 
 def test_short_message_is_untouched(criteria: Criteria) -> None:
