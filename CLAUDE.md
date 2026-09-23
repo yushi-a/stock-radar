@@ -22,6 +22,9 @@
 - [#48](https://github.com/yushi-a/stock-radar/issues/48) CSV の取り出し方。
   いまは PVC に置くだけで、参照するのに `sudo` が要る
 - local PVC のバックアップ方法（`docs/open-questions.md`）
+- 評価スキルとの前提のずれ（[#54](https://github.com/yushi-a/stock-radar/issues/54) モート・カタリストの条件が無い、
+  [#55](https://github.com/yushi-a/stock-radar/issues/55) トラックAが成長性軸で低く出る）。
+  どちらも `docs/open-questions.md` 行きで、判断の前に候補20件前後の簡易評価の結果が要る
 - 日本株対応、Kill 条件監視、フィードバック記録（いずれも第一弾より後と合意済み）
 
 ## 作業前に必ず読むもの
