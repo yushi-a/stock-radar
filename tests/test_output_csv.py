@@ -71,6 +71,20 @@ def test_values_match_the_judgement(tmp_path: Path, criteria: Criteria) -> None:
     assert row["revenue_growth_yoy"] == "0.05"
 
 
+def test_carries_reference_values_not_used_in_screening(tmp_path: Path, criteria: Criteria) -> None:
+    """判定に使わない参考値も載せる。取れなければ空欄（0 で埋めない）。"""
+    result = evaluate(make(gross_margin_change_3y=-0.099), criteria)
+    write_candidates(
+        tmp_path / "out.csv",
+        [result],
+        market=Market.US,
+        data_source="sec_companyfacts+yfinance",
+        as_of=AS_OF,
+    )
+    assert read(tmp_path / "out.csv")[0]["gross_margin_change_3y"] == "-0.099"
+    assert write(tmp_path / "blank.csv", criteria)[0]["gross_margin_change_3y"] == ""
+
+
 def test_passed_filters_fit_in_one_cell(tmp_path: Path, criteria: Criteria) -> None:
     """カンマだと CSV の区切りと紛らわしいのでセミコロンで繋ぐ。"""
     row = write(tmp_path / "out.csv", criteria)[0]

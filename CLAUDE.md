@@ -22,7 +22,6 @@
 - [#48](https://github.com/yushi-a/stock-radar/issues/48) CSV の取り出し方。
   いまは PVC に置くだけで、参照するのに `sudo` が要る
 - local PVC のバックアップ方法（`docs/open-questions.md`）
-- [#54](https://github.com/yushi-a/stock-radar/issues/54) 評価スキルのモート・カタリストに対応する条件が無い
 - 日本株対応、Kill 条件監視、フィードバック記録（いずれも第一弾より後と合意済み）
 
 ## 作業前に必ず読むもの

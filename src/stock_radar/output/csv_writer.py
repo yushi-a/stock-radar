@@ -10,6 +10,13 @@
 どの決算期の、いつ提出された数字で、株価はいつ時点かが分からないと、食い違ったときに
 どちらが古いのか判断できない。
 
+## 参考値
+
+判定には使わないが、評価スキルが採点するときの手がかりになる値も載せる。
+いまは `gross_margin_change_3y`（③モートの「粗利率の維持 / 低下」）だけ。
+`screen_results` には持たない。あのテーブルは判定に使った値を残す場所で、参考値は
+`fundamentals` から計算し直せる。
+
 ## 判断はしない
 
 期待倍率・スコア・目標株価は出さない（CLAUDE.md）。`timing_score` は並べ替えのための
@@ -28,7 +35,7 @@ from stock_radar.screen.evaluate import Evaluation
 
 __all__ = ["COLUMNS", "csv_path_for", "write_candidates"]
 
-# 並び順は「識別 → 通過理由 → 判定に使った値 → 出典と基準日」。
+# 並び順は「識別 → 通過理由 → 判定に使った値 → 参考値 → 出典と基準日」。
 # 先頭を評価スキルのたたき台に合わせてあるので、そのまま読み込める。
 COLUMNS: tuple[str, ...] = (
     "ticker",
@@ -58,6 +65,8 @@ COLUMNS: tuple[str, ...] = (
     # --- タイミング加点
     "drawdown_from_52w_high",
     "range_position_52w",
+    # --- 参考値（判定には使わない。評価スキルの手がかり）
+    "gross_margin_change_3y",
     # --- 出典と基準日（CLAUDE.md「数値の出典を記録する」）
     "fundamentals_fiscal_year",
     "fundamentals_period_end",
@@ -114,6 +123,8 @@ def _row(
         "current_ratio": metrics.current_ratio,
         "drawdown_from_52w_high": candidate.drawdown_from_52w_high,
         "range_position_52w": candidate.range_position_52w,
+        # 評価スキルの③モートの手がかり。判定に使っていないので screen_results には持たない（#54）。
+        "gross_margin_change_3y": metrics.gross_margin_change_3y,
         "fundamentals_fiscal_year": fundamentals.fiscal_year,
         "fundamentals_period_end": fundamentals.period_end,
         "fundamentals_filed_at": fundamentals.filed_at,
