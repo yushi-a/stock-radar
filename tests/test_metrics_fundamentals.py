@@ -228,6 +228,32 @@ def test_missing_gross_profit_does_not_break_the_rest() -> None:
     assert metrics.op_margin == pytest.approx(0.05)
 
 
+def test_gross_margin_change_over_three_years() -> None:
+    """粗利率の3年変化は率の差（pt）。低下はマイナスで出る。"""
+    metrics = compute_metrics(
+        [
+            fy(2024, revenue=1000.0, gross_profit=600.0),
+            fy(2023, revenue=900.0, gross_profit=600.0),
+            fy(2022, revenue=800.0),
+            fy(2021, revenue=700.0, gross_profit=490.0),
+        ]
+    )
+    assert metrics is not None
+    assert metrics.gross_margin_change_3y == pytest.approx(0.60 - 0.70)
+
+
+def test_gross_margin_change_needs_both_ends() -> None:
+    """どちらかの年度で粗利が取れなければ None。0 で埋めない。"""
+    no_base = compute_metrics(
+        [fy(2024, revenue=1000.0, gross_profit=600.0), fy(2021, revenue=700.0)]
+    )
+    no_latest = compute_metrics(
+        [fy(2024, revenue=1000.0), fy(2021, revenue=700.0, gross_profit=490.0)]
+    )
+    assert no_base is not None and no_base.gross_margin_change_3y is None
+    assert no_latest is not None and no_latest.gross_margin_change_3y is None
+
+
 def test_zero_revenue_does_not_divide_by_zero() -> None:
     metrics = compute_metrics([fy(2024, revenue=0.0, operating_income=-10.0)])
     assert metrics is not None
@@ -329,7 +355,7 @@ SYNTHETIC: dict[str, list[Fundamentals]] = {
         ),
         fy(2023, revenue=1200.0, operating_income=180.0, total_assets=1900.0),
         fy(2022, revenue=1100.0),
-        fy(2021, revenue=1000.0),
+        fy(2021, revenue=1000.0, gross_profit=400.0),
     ],
     # 赤字・高成長・高粗利。トラックB が想定する形。
     "loss_making_grower": [
@@ -438,6 +464,7 @@ EXPECTED: dict[str, dict[str, float | None]] = {
         "equity_ratio": 0.6,
         "current_ratio": 2.0,
         "asset_growth_minus_ebit_growth": -0.0585,
+        "gross_margin_change_3y": 0.0511,
     },
     "loss_making_grower": {
         "revenue_cagr_3y": 0.4938,
@@ -452,6 +479,8 @@ EXPECTED: dict[str, dict[str, float | None]] = {
         # 前期の EBIT が赤字なので「EBIT成長率」は定義できない。
         # -80 / -70 - 1 = +14% と出すと、赤字が拡大したのに成長したことになる。
         "asset_growth_minus_ebit_growth": None,
+        # 3年前の粗利が無い。
+        "gross_margin_change_3y": None,
     },
     "no_gross_profit": {
         "revenue_cagr_3y": 0.0557,
@@ -464,6 +493,7 @@ EXPECTED: dict[str, dict[str, float | None]] = {
         "equity_ratio": 0.3,
         "current_ratio": 0.5,
         "asset_growth_minus_ebit_growth": -0.0298,
+        "gross_margin_change_3y": None,
     },
     "asset_bloat": {
         "revenue_cagr_3y": 0.0557,
@@ -476,6 +506,7 @@ EXPECTED: dict[str, dict[str, float | None]] = {
         "equity_ratio": 0.25,
         "current_ratio": 0.5556,
         "asset_growth_minus_ebit_growth": 1.1667,
+        "gross_margin_change_3y": None,
     },
     "recent_ipo": {
         "revenue_cagr_3y": None,
@@ -488,6 +519,8 @@ EXPECTED: dict[str, dict[str, float | None]] = {
         "equity_ratio": 0.75,
         "current_ratio": 3.5,
         "asset_growth_minus_ebit_growth": None,
+        # 3年前の年度が無い。
+        "gross_margin_change_3y": None,
     },
     "negative_equity": {
         "revenue_cagr_3y": -0.0385,
@@ -500,6 +533,7 @@ EXPECTED: dict[str, dict[str, float | None]] = {
         "equity_ratio": -0.1667,
         "current_ratio": 0.4,
         "asset_growth_minus_ebit_growth": None,
+        "gross_margin_change_3y": None,
     },
 }
 

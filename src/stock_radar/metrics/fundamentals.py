@@ -80,6 +80,10 @@ class FundamentalMetrics:
     # 「資産を膨らませているのに収益が伴わない企業を外す」という条件の趣旨からは
     # 黒字転換は通すべきに見えるが、判定に使うかは Phase 4 で決める。
     ebit_turned_positive: bool = False
+    # 粗利率の3年変化（直近年度 − 3年前、率の差）。**判定には使わない参考値。**
+    # 評価スキルの③モートは「粗利率の維持 / 低下」を裏付けに使うので、その手がかりとして
+    # CSV に載せる（#54）。事業構成の変化でも動くため、足切りにはしない。
+    gross_margin_change_3y: float | None = None
     warnings: tuple[str, ...] = ()
 
 
@@ -206,6 +210,14 @@ def compute_metrics(
 
     fcf = latest.cfo - latest.capex if latest.cfo is not None and latest.capex is not None else None
 
+    margin_now = ratio(latest.gross_profit, latest.revenue)
+    margin_then = (
+        ratio(three_years_ago.gross_profit, three_years_ago.revenue) if three_years_ago else None
+    )
+    margin_change = (
+        margin_now - margin_then if margin_now is not None and margin_then is not None else None
+    )
+
     return FundamentalMetrics(
         cik=latest.cik,
         fiscal_year=latest.fiscal_year,
@@ -216,7 +228,7 @@ def compute_metrics(
         revenue_growth_yoy=(growth(latest.revenue, prior_year.revenue) if prior_year else None),
         revenue_growth_latest_quarter_yoy=latest_quarter_yoy(quarters),
         op_margin=ratio(latest.operating_income, latest.revenue),
-        gross_margin=ratio(latest.gross_profit, latest.revenue),
+        gross_margin=margin_now,
         fcf=fcf,
         roa=ratio(latest.net_income, latest.total_assets),
         roe=ratio(latest.net_income, latest.equity),
@@ -224,6 +236,7 @@ def compute_metrics(
         current_ratio=ratio(latest.current_assets, latest.current_liabilities),
         asset_growth_minus_ebit_growth=spread,
         ebit_turned_positive=turned_positive,
+        gross_margin_change_3y=margin_change,
         warnings=quality_warnings(latest, prior_year),
     )
 
