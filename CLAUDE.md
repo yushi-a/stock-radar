@@ -19,8 +19,8 @@
 
 **次に手を付けるときは、まず開いている issue を見る。** 判明している宿題：
 
-- [#48](https://github.com/yushi-a/stock-radar/issues/48) CSV の取り出し方。
-  いまは PVC に置くだけで、参照するのに `sudo` が要る
+- CSV の Drive アップロード（#48）の初回セットアップ。OAuth クライアントの作成と `yushi-a/helm` の Secret への登録が済むまで、
+  通知の最終行にはアップロード失敗が出る（手順は `docs/architecture.md` の「CSV の取り出し」）
 - local PVC のバックアップ方法（`docs/open-questions.md`）
 - 日本株対応、Kill 条件監視、フィードバック記録（いずれも第一弾より後と合意済み）
 
@@ -46,7 +46,7 @@
   - 初回対象は米国株（SEC EDGAR + yfinance）。日本株は第一弾より後。
   - Python + uv / DuckDB 単一ファイル（`data/stock_radar.duckdb`）。
   - まずローカル CLI で育て、安定後に K3s CronJob（クラスタ `yuxsr-dev` / ノード `pollux`）。
-  - 出力は CSV + 通知（同一クラスタ内の自前アプリ `notificator`）。
+  - 出力は CSV + 通知（同一クラスタ内の自前アプリ `notificator`）。CSV は Google Drive の非公開フォルダにも上げ、通知に URL を載せる（#48）。
 - **パイプラインの処理順を崩さない。** 株価取得（yfinance）は必ず財務による足切りの後に実行する。先に対象を半減させることが 429 対策の中核になっている。
 - **第一弾のスコープを広げない。** スクリーニング + CSV + 通知 + デプロイ（Phase 6）まで。Kill 条件監視・フィードバック記録・日本株対応は後回しと合意済み。
 - **マニフェストは別リポジトリ。** K8s 関連は `yushi-a/helm`（Helmfile + Helm + SOPS）で管理する。既存の `stock-notificator` チャートが最も近い前例。

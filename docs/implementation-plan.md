@@ -190,6 +190,7 @@ Phase 2a で決めたルールを実装する。
     `grpcio` や proto のコード生成は不要
   - **バックエンドが LINE のため、送れるのは単一の文字列で実用上は数百文字。
     候補リスト全体は送らず要約に絞る。CSV は PVC 上に置いてパスだけ載せる**
+    （#48 で CSV は Google Drive に上げ、通知には URL を載せるように変えた）
   - 通知は Phase 5 の最後に回す。CSV 出力までが動けば運用は始められるため、ここをブロッカーにしない
 - CLI：`stock-radar run --market us --criteria config/criteria.yaml --runtime config/runtime.yaml`
   フェーズ単位でも実行できるようにする（`fetch-universe` / `fetch-facts` / `fetch-prices` / `screen`）
