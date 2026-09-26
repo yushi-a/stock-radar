@@ -93,6 +93,10 @@ drive:
   client_id_env: GOOGLE_OAUTH_CLIENT_ID
   client_secret_env: GOOGLE_OAUTH_CLIENT_SECRET
   refresh_token_env: GOOGLE_OAUTH_REFRESH_TOKEN
-  # drive.file では手で作ったフォルダは見えないので、この名前でアプリが作る。
+  # 上げ先のフォルダ。ID が環境変数に入っているときだけ ID で特定する（#60）。
+  # 名前を変えても移動しても追える。特定できなければ失敗にし、名前で探すほうへは戻らない。
+  # drive.file では手で作ったフォルダは見えないので、入れるのはアプリが作ったフォルダの ID。
+  folder_id_env: GOOGLE_DRIVE_FOLDER_ID
+  # ID が無いときは、この名前で探して無ければ作る。
   folder_name: stock-radar
   timeout_sec: 30

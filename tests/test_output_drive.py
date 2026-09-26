@@ -16,7 +16,7 @@ import httpx
 import pytest
 
 from stock_radar.config import DriveRuntime
-from stock_radar.output.drive import upload_csv
+from stock_radar.output.drive import FOLDER_MIME, upload_csv
 from stock_radar.output.drive_auth import authorization_url
 
 ENV = {
@@ -30,10 +30,12 @@ ENV = {
 def runtime(monkeypatch: pytest.MonkeyPatch) -> DriveRuntime:
     for name, value in ENV.items():
         monkeypatch.setenv(name, value)
+    monkeypatch.delenv("TEST_GOOGLE_DRIVE_FOLDER_ID", raising=False)
     return DriveRuntime(
         client_id_env="TEST_GOOGLE_CLIENT_ID",
         client_secret_env="TEST_GOOGLE_CLIENT_SECRET",
         refresh_token_env="TEST_GOOGLE_REFRESH_TOKEN",
+        folder_id_env="TEST_GOOGLE_DRIVE_FOLDER_ID",
         folder_name="stock-radar",
         timeout_sec=5.0,
     )
@@ -49,9 +51,19 @@ def csv_file(tmp_path: Path) -> Path:
 class FakeDrive:
     """呼ばれた要求を記録し、Drive / OAuth らしい応答を返す。"""
 
-    def __init__(self, *, folder: str | None = None, existing: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        folder: str | None = None,
+        existing: str | None = None,
+        by_id: httpx.Response | None = None,
+    ) -> None:
         self.folder = folder
         self.existing = existing
+        # ID で引いたときの応答。既定は使えるフォルダ。
+        self.by_id = by_id or httpx.Response(
+            200, json={"id": "given", "mimeType": FOLDER_MIME, "trashed": False}
+        )
         self.requests: list[httpx.Request] = []
         self.token_response = httpx.Response(200, json={"access_token": "access"})
 
@@ -61,6 +73,8 @@ class FakeDrive:
         if url.host == "oauth2.googleapis.com":
             return self.token_response
         assert request.headers["Authorization"] == "Bearer access"
+        if request.method == "GET" and url.path.startswith("/drive/v3/files/"):
+            return self.by_id
         if request.method == "GET":
             query = url.params["q"]
             found = self.folder if "mimeType" in query else self.existing
@@ -180,6 +194,76 @@ def test_folder_name_is_escaped_in_the_query(runtime: DriveRuntime, csv_file: Pa
     upload_csv(csv_file, runtime.model_copy(update={"folder_name": "it's"}), client=drive.client())
 
     assert "name = 'it\\'s'" in drive.requests[1].url.params["q"]
+
+
+# --- フォルダを ID で指定する（#60） -----------------------------------------
+
+
+def test_folder_id_is_used_instead_of_searching_by_name(
+    runtime: DriveRuntime, csv_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ID があれば名前では探さず、作りもしない。名前を変えても移動しても追える。"""
+    monkeypatch.setenv("TEST_GOOGLE_DRIVE_FOLDER_ID", "given")
+    drive = FakeDrive()
+    result = upload_csv(csv_file, runtime, client=drive.client())
+
+    assert result.uploaded
+    assert drive.calls() == [
+        ("POST", "oauth2.googleapis.com/token"),
+        ("GET", "www.googleapis.com/drive/v3/files/given"),  # ID で確かめる
+        ("GET", "www.googleapis.com/drive/v3/files"),  # 同名ファイルを探す
+        ("POST", "www.googleapis.com/upload/drive/v3/files"),
+    ]
+    assert "'given' in parents" in drive.requests[2].url.params["q"]
+    assert '"parents": ["given"]' in drive.requests[-1].content.decode()
+
+
+@pytest.mark.parametrize(
+    ("response", "reason"),
+    [
+        (httpx.Response(404, json={"error": {"code": 404}}), "見つからない"),
+        (
+            httpx.Response(200, json={"id": "given", "mimeType": "text/csv", "trashed": False}),
+            "フォルダではない",
+        ),
+        (
+            httpx.Response(200, json={"id": "given", "mimeType": FOLDER_MIME, "trashed": True}),
+            "ゴミ箱",
+        ),
+    ],
+    ids=["not-found", "not-a-folder", "trashed"],
+)
+def test_unusable_folder_id_fails_without_falling_back_to_the_name(
+    runtime: DriveRuntime,
+    csv_file: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    response: httpx.Response,
+    reason: str,
+) -> None:
+    """特定できなければ失敗にする。名前で探すと、ID を入れた意図と違う場所に黙って上がる。"""
+    monkeypatch.setenv("TEST_GOOGLE_DRIVE_FOLDER_ID", "given")
+    drive = FakeDrive(folder="by-name", by_id=response)
+    result = upload_csv(csv_file, runtime, client=drive.client())
+
+    assert not result.uploaded
+    assert reason in (result.error or "")
+    # 名前での検索もフォルダの作成もアップロードもしていない。
+    assert drive.calls() == [
+        ("POST", "oauth2.googleapis.com/token"),
+        ("GET", "www.googleapis.com/drive/v3/files/given"),
+    ]
+
+
+def test_empty_folder_id_keeps_the_name_based_behavior(
+    runtime: DriveRuntime, csv_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """空文字は「未設定」として扱う。helm で空の値が渡っても、これまでどおり動く。"""
+    monkeypatch.setenv("TEST_GOOGLE_DRIVE_FOLDER_ID", "")
+    drive = FakeDrive(folder="by-name")
+    result = upload_csv(csv_file, runtime, client=drive.client())
+
+    assert result.uploaded
+    assert "mimeType" in drive.requests[1].url.params["q"]
 
 
 def test_authorization_url_asks_for_a_refresh_token() -> None:
