@@ -226,7 +226,7 @@ Phase 2a で決めたルールを実装する。
 
 - main への push とタグ（`v*.*.*`）でビルドして `ghcr.io/yushi-a/stock-radar` へ push する
 - **PR ではビルドして起動確認だけ行い push しない。** Dockerfile の破損を main の手前で拾う
-- タグは `sha-<full sha>` / `latest`（main のみ）/ semver。`GITHUB_TOKEN` で認証でき、追加のシークレットは不要
+- タグは `sha-<full sha>` / `latest`（main のみ）/ semver（Git タグと同じ `v` 付き。`v0.1.0` と `v0.1`）。`GITHUB_TOKEN` で認証でき、追加のシークレットは不要
 - **Helmfile から参照するのは `sha-` タグ**。どのコミットが動いているかをイメージ名だけで特定できる
 - ビルド後に `--help` と「非 root であること・`curl` があること」を実際に走らせて見る。
   ビルドが通るだけでは実行層の壊れを拾えない

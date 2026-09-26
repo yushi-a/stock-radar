@@ -39,11 +39,13 @@ jobs:
           images: ${{ env.IMAGE }}
           # Helmfile から参照するのは sha- タグ。どのコミットが動いているかを
           # イメージ名だけで特定できるようにする。latest は人が試すとき用。
+          # semver は既定で先頭の v を外すが、Git タグ（v0.1.0）と同じ文字列で
+          # 引けるよう v を付け直す。
           tags: |
             type=sha,format=long
             type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
 
       - uses: docker/build-push-action@v7.4.0
         with:
