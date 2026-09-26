@@ -307,6 +307,8 @@ class DriveRuntime(_Model):
     client_id_env: str = Field(min_length=1)
     client_secret_env: str = Field(min_length=1)
     refresh_token_env: str = Field(min_length=1)
+    # この環境変数にフォルダ ID が入っているときだけ ID で特定する。無ければ folder_name で探す。
+    folder_id_env: str = Field(min_length=1)
     folder_name: str = Field(min_length=1)
     timeout_sec: float = Field(gt=0)
 

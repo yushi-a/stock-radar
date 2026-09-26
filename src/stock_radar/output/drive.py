@@ -15,11 +15,17 @@ claude.ai / クラウドからは読めない（#48）。Drive の非公開フ�
 漏れても Drive の他のファイルは読まれない。審査も要らない。
 OAuth アプリを「テスト」状態のままにするとトークンが7日で失効するので、「本番」にしておく。
 
-## フォルダはアプリ自身が作る
+## フォルダは ID で指定するか、名前で探して無ければ作る
 
 `drive.file` では、ユーザーが手で作ったフォルダは見えない（子を足せない）。
-名前（`drive.folder_name`）で探し、無ければ作る。同じ名前のファイルがあれば中身だけ
-差し替える（同じ日に run をやり直したときに重複させない）。
+使えるのはアプリが作ったフォルダだけ。
+
+- **環境変数 `drive.folder_id_env` に ID が入っているときは、その ID のフォルダに上げる**（#60）。
+  名前を変えても移動しても追える。**特定できなければ失敗にし、名前で探すほうへは戻らない。**
+  戻ると、ID を入れた意図（このフォルダに上げる）と違う場所に黙って上がる
+- ID が無いときは、名前（`drive.folder_name`）で探し、無ければ作る
+
+同じ名前のファイルがあれば中身だけ差し替える（同じ日に run をやり直したときに重複させない）。
 
 ## 失敗しても run を落とさない
 
@@ -31,6 +37,8 @@ Google のクライアントライブラリは使わない。REST 数本で足�
 from __future__ import annotations
 
 import json
+import os
+import urllib.parse
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -77,7 +85,11 @@ def upload_csv(path: Path, runtime: DriveRuntime, *, client: httpx.Client) -> Up
             refresh_token=require_env(runtime.refresh_token_env),
         )
         headers = {"Authorization": f"Bearer {token}"}
-        folder_id = _find_or_create_folder(client, headers, runtime.folder_name)
+        configured = os.environ.get(runtime.folder_id_env)
+        if configured:
+            folder_id = _check_folder(client, headers, configured)
+        else:
+            folder_id = _find_or_create_folder(client, headers, runtime.folder_name)
         url = _put_file(client, headers, folder_id, path)
     except Exception as exc:
         return UploadResult(uploaded=False, error=f"{type(exc).__name__}: {exc}")
@@ -103,6 +115,27 @@ def access_token(
         raise DriveError("リフレッシュトークンが失効した。drive-auth で取り直す")
     _raise_for_status(response)
     return str(response.json()["access_token"])
+
+
+def _check_folder(client: httpx.Client, headers: dict[str, str], folder_id: str) -> str:
+    """ID で指定されたフォルダが使えるかを確かめる。使えなければ失敗にする（名前では探さない）。"""
+    response = client.get(
+        f"{FILES_URL}/{urllib.parse.quote(folder_id, safe='')}",
+        headers=headers,
+        params={"fields": "id,mimeType,trashed"},
+    )
+    if response.status_code == 404:
+        # drive.file では、手で作ったフォルダも「存在しない」として返る。
+        raise DriveError(
+            f"フォルダ {folder_id} が見つからない（アプリが作ったフォルダの ID か確かめる）"
+        )
+    _raise_for_status(response)
+    body = response.json()
+    if body.get("mimeType") != FOLDER_MIME:
+        raise DriveError(f"{folder_id} はフォルダではない")
+    if body.get("trashed"):
+        raise DriveError(f"フォルダ {folder_id} はゴミ箱にある")
+    return folder_id
 
 
 def _find_or_create_folder(client: httpx.Client, headers: dict[str, str], name: str) -> str:
