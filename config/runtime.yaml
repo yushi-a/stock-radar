@@ -76,9 +76,23 @@ notify:
   path: /yuxsr.notification.v1.NotificatorService/Notify
   timeout_sec: 10
   # バックエンドが LINE Bot の push message（5,000文字上限）のため、実用上は数百文字に
-  # 収める。CSV は添付できないので PVC 上に置いてパスだけ載せる。
+  # 収める。CSV は添付できないので Drive に上げて URL を載せる（drive）。
   max_message_chars: 900
   # 通知に載せる候補の上限。**あふれた分は「ほかN件は省略」と書いてから落とす。**
   # 黙って切ると、届いた一覧が候補の全部だと読めてしまう。
   # 20件は実測の候補数（21件前後）とほぼ同じで、社名込みでも900文字に収まる件数。
   max_listed: 20
+
+drive:
+  # CSV を Google Drive の非公開フォルダに上げ、通知に URL を載せる（#48）。
+  # 評価スキルは claude.ai / クラウドで動かすので、PVC に置くだけでは届かない。
+  # 個人アカウントではサービスアカウントが使えない（保存容量が無い）ため、
+  # 本人の OAuth リフレッシュトークンで書く。取得は `stock-radar drive-auth`。
+  # スコープは drive.file（このアプリが作ったファイルにしか触れない）。
+  # 失敗しても run は落とさず、通知に失敗を書く（CSV は PVC に残る）。
+  client_id_env: GOOGLE_OAUTH_CLIENT_ID
+  client_secret_env: GOOGLE_OAUTH_CLIENT_SECRET
+  refresh_token_env: GOOGLE_OAUTH_REFRESH_TOKEN
+  # drive.file では手で作ったフォルダは見えないので、この名前でアプリが作る。
+  folder_name: stock-radar
+  timeout_sec: 30

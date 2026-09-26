@@ -302,11 +302,21 @@ class NotifyRuntime(_Model):
     max_listed: int = Field(ge=0)
 
 
+class DriveRuntime(_Model):
+    # OAuth クライアントとリフレッシュトークンは環境変数で渡す（output/drive.py）。
+    client_id_env: str = Field(min_length=1)
+    client_secret_env: str = Field(min_length=1)
+    refresh_token_env: str = Field(min_length=1)
+    folder_name: str = Field(min_length=1)
+    timeout_sec: float = Field(gt=0)
+
+
 class Runtime(_Model):
     sec: SecRuntime
     prices: PricesRuntime
     output: OutputRuntime
     notify: NotifyRuntime
+    drive: DriveRuntime
 
 
 # --- 読み込み ---------------------------------------------------------------

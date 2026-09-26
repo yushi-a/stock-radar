@@ -28,6 +28,8 @@ from stock_radar.config import (
 )
 from stock_radar.metrics.market import multi_class_ciks, rebuild_market_metrics
 from stock_radar.output.csv_writer import csv_path_for, write_candidates
+from stock_radar.output.drive import UploadResult, upload_csv
+from stock_radar.output.drive_auth import run_drive_auth
 from stock_radar.output.notify import build_message, httpx_poster, notify, summary_lines
 from stock_radar.screen.evaluate import Track
 from stock_radar.screen.runner import (
@@ -119,13 +121,22 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="notificator に通知しない（宛先はクラスタ内なのでローカルでは届かない）",
     )
+    screen_cmd.add_argument(
+        "--no-upload", action="store_true", help="CSV を Google Drive に上げない"
+    )
 
     full = sub.add_parser("run", help="全工程を順に回す（CronJob が叩くのはこれ）")
     full.add_argument("--limit", type=int, help="株価を取る銘柄を先頭 N 件に絞る")
     full.add_argument("--tickers", help="株価を取る銘柄を直接指定する（カンマ区切り）")
     full.add_argument("--no-notify", action="store_true", help="notificator に通知しない")
+    full.add_argument("--no-upload", action="store_true", help="CSV を Google Drive に上げない")
     full.add_argument(
         "--force-download", action="store_true", help="手元の zip が新しくても取り直す"
+    )
+
+    sub.add_parser(
+        "drive-auth",
+        help="Google Drive のリフレッシュトークンを取る（初回だけ。ブラウザで同意する）",
     )
     return parser
 
@@ -324,6 +335,7 @@ def screen_command(
     with_price: bool,
     dry_run: bool,
     send_notification: bool,
+    upload: bool = True,
 ) -> int:
     with open_database(db_path) as con:
         report = screen(con, criteria, market=market, with_price=with_price)
@@ -402,6 +414,7 @@ def screen_command(
         # ファイル名と記録がずれる。
         moment = utc_now()
         path: Path | None = None
+        uploaded: UploadResult | None = None
         if with_price:
             path = csv_path_for(runtime.output.csv_dir, market=market, as_of=moment.date())
             # 複数クラス株の時価総額は近似（docs/xbrl-findings.md の C）。近似は近似として示す。
@@ -417,6 +430,8 @@ def screen_command(
                 ],
             )
             log.info("%s 行を %s に書いた", f"{written:,}", path)
+            if upload:
+                uploaded = _upload(runtime, path)
         else:
             # 株価条件を当てていない一覧は評価スキルに渡す候補リストではない。
             # 同じ名前で書くと、本番の run の CSV を測定用の中間結果で上書きしてしまう。
@@ -428,8 +443,24 @@ def screen_command(
         log.info("run_id=%s として記録した（通過 %s 件）", run_id, f"{len(report.passed):,}")
 
         if send_notification:
-            _notify(runtime, report, moment=moment, market=market, csv_path=path)
+            _notify(runtime, report, moment=moment, market=market, csv_path=path, uploaded=uploaded)
     return 0
+
+
+def _upload(runtime: Runtime, path: Path) -> UploadResult:
+    """CSV を Drive に上げる。**失敗しても run は落とさない**（通知に失敗を書く）。
+
+    CSV は PVC に残っているので、後から上げ直せる。
+    """
+    import httpx
+
+    with httpx.Client(timeout=runtime.drive.timeout_sec) as client:
+        result = upload_csv(path, runtime.drive, client=client)
+    if result.uploaded:
+        log.info("Drive に上げた: %s", result.url)
+    else:
+        log.warning("Drive へのアップロードに失敗した: %s", result.error)
+    return result
 
 
 def _notify(
@@ -439,6 +470,7 @@ def _notify(
     moment: dt.datetime,
     market: Market,
     csv_path: Path | None,
+    uploaded: UploadResult | None,
 ) -> None:
     """結果の要約を notificator に送る。**失敗しても run は落とさない。**
 
@@ -454,6 +486,8 @@ def _notify(
         coverage_warn_threshold=runtime.prices.coverage_warn_threshold,
         csv_path=str(csv_path) if csv_path else None,
         max_listed=runtime.notify.max_listed,
+        csv_url=uploaded.url if uploaded else None,
+        upload_error=uploaded.error if uploaded else None,
     )
     message = build_message(lines, max_chars=runtime.notify.max_message_chars)
     result = notify(message, runtime.notify, poster=httpx_poster)
@@ -488,6 +522,7 @@ def run_all(
     limit: int | None = None,
     tickers: str | None = None,
     send_notification: bool = True,
+    upload: bool = True,
     force: bool = False,
 ) -> int:
     """全工程を順に回す。CronJob が叩くのはこれ。
@@ -519,6 +554,7 @@ def run_all(
                 with_price=True,
                 dry_run=False,
                 send_notification=send_notification,
+                upload=upload,
             ),
         ),
     ]
@@ -558,6 +594,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             with_price=not args.no_price_filters,
             dry_run=args.dry_run,
             send_notification=not args.no_notify,
+            upload=not args.no_upload,
         )
     if args.command == "run":
         return run_all(
@@ -568,8 +605,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             limit=args.limit,
             tickers=args.tickers,
             send_notification=not args.no_notify,
+            upload=not args.no_upload,
             force=args.force_download,
         )
+    if args.command == "drive-auth":
+        return run_drive_auth(runtime.drive)
     raise AssertionError(f"未知のサブコマンド: {args.command}")
 
 

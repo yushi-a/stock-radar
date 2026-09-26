@@ -166,6 +166,35 @@ def test_the_whole_list_fits_at_the_configured_limit(criteria: Criteria) -> None
     assert message == "\n".join(lines)
 
 
+DRIVE_URL = "https://drive.google.com/file/d/1aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456/view?usp=drivesdk"
+
+
+def test_uploaded_csv_is_linked_by_url(criteria: Criteria) -> None:
+    """Drive に上がったら URL を載せる。PVC のパスは claude.ai から読めないので出さない。"""
+    lines = lines_for(criteria, csv_url=DRIVE_URL)
+    assert lines[-1] == f"CSV: {DRIVE_URL}"
+    assert "output/2026-09-21_us.csv" not in "\n".join(lines)
+
+
+def test_upload_failure_is_written_with_the_local_path(criteria: Criteria) -> None:
+    """失敗しても run は落とさない。代わりに毎週の通知で目に入るようにする。"""
+    lines = lines_for(criteria, upload_error="x" * 500)
+    assert lines[-1].startswith("CSV: output/2026-09-21_us.csv（Drive へのアップロード失敗: ")
+    # 理由は長くなりうる（HTTP の本文）ので切る。
+    assert len(lines[-1]) < 150
+
+
+@pytest.mark.parametrize(
+    "csv", [{"csv_url": DRIVE_URL}, {"upload_error": "x" * 500}], ids=["url", "failure"]
+)
+def test_the_whole_list_still_fits_with_the_drive_line(
+    criteria: Criteria, csv: dict[str, str]
+) -> None:
+    """URL や失敗の理由で最終行が伸びても、運用値では切り詰めが起きない。"""
+    lines = lines_for(criteria, count=25, max_listed=20, price_coverage=0.5, **csv)
+    assert build_message(lines, max_chars=900) == "\n".join(lines)
+
+
 def test_short_message_is_untouched(criteria: Criteria) -> None:
     lines = lines_for(criteria)
     assert build_message(lines, max_chars=900) == "\n".join(lines)
