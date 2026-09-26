@@ -88,6 +88,13 @@ def test_run_takes_the_price_scoping_options() -> None:
     assert (args.limit, args.tickers, args.no_notify) == (10, None, True)
 
 
+def test_upload_can_be_skipped_for_local_runs() -> None:
+    """Drive の資格情報が無い手元の実行で、毎回失敗のログを出さないため。"""
+    assert build_parser().parse_args(["run", "--no-upload"]).no_upload is True
+    assert build_parser().parse_args(["screen", "--no-upload"]).no_upload is True
+    assert build_parser().parse_args(["run"]).no_upload is False
+
+
 def test_run_stops_at_the_first_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """半端なデータで候補を出さない。失敗したら後続を呼ばない。"""
     called: list[str] = []

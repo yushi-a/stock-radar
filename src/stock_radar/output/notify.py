@@ -21,7 +21,8 @@ Go と TypeScript しか生成しておらず、gRPC で話そうとすると自
 ## 送れるのは短い文字列1つだけ
 
 `NotifyRequest` のフィールドは `message`（string）のみで、バックエンドは LINE Bot の
-push message。CSV は添付できないので PVC 上に置いてパスだけ載せる。
+push message。CSV は添付できないので Drive に上げて URL を載せる（`output/drive.py`）。
+アップロードに失敗したら PVC 上のパスと失敗の理由を載せる。
 
 ## 候補一覧は `max_listed` 件まで載せ、省略したら省略したと書く
 
@@ -98,6 +99,8 @@ def summary_lines(
     coverage_warn_threshold: float,
     csv_path: str | None,
     max_listed: int,
+    csv_url: str | None = None,
+    upload_error: str | None = None,
 ) -> list[str]:
     """通知に載せる行。**判断はしない**（スコアも期待倍率も出さない。CLAUDE.md）。"""
     tracks = " / ".join(f"{name}:{count}" for name, count in sorted(track_counts.items()))
@@ -125,7 +128,12 @@ def summary_lines(
         if omitted > 0:
             # 黙って切ると、届いた一覧が候補の全部だと読めてしまう。
             lines.append(f"ほか{omitted}件は省略。CSV を参照")
-    if csv_path:
+    if csv_url:
+        lines.append(f"CSV: {csv_url}")
+    elif csv_path and upload_error:
+        # 失敗は毎週の通知で目に入るようにする。トークン失効は放っておいても直らない。
+        lines.append(f"CSV: {csv_path}（Drive へのアップロード失敗: {upload_error[:80]}）")
+    elif csv_path:
         lines.append(f"CSV: {csv_path}")
     return lines
 
