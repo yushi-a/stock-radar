@@ -54,6 +54,10 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           # push しない PR では手元の docker に取り出す。次の起動確認に使う。
           load: ${{ github.event_name == 'pull_request' }}
+          # setup-buildx（docker-container ドライバ）では provenance の attestation が既定で付き、
+          # push するイメージが OCI image index になる。単一マニフェストにして、
+          # web-front・notificator・stock-notificator と揃える。
+          provenance: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
