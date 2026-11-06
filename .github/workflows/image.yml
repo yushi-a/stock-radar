@@ -47,12 +47,17 @@ jobs:
             type=semver,pattern=v{{version}}
             type=semver,pattern=v{{major}}.{{minor}}
 
-      - uses: docker/build-push-action@v7.4.0
+      - id: build
+        uses: docker/build-push-action@v7.4.0
         with:
           context: .
           push: ${{ github.event_name != 'pull_request' }}
           # push しない PR では手元の docker に取り出す。次の起動確認に使う。
           load: ${{ github.event_name == 'pull_request' }}
+          # setup-buildx（docker-container ドライバ）では provenance の attestation が既定で付き、
+          # push するイメージが OCI image index になる。単一マニフェストにして、
+          # web-front・notificator・stock-notificator と揃える。
+          provenance: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -65,3 +70,34 @@ jobs:
           docker run --rm --entrypoint sh "${IMAGE}:${TAG}" -c 'id -u | grep -qv "^0$" && command -v curl'
         env:
           TAG: ${{ steps.meta.outputs.version }}
+
+      # PR では load したイメージ、main・タグでは push したイメージ（digest で指す）を調べる。
+      - id: scan-ref
+        run: |
+          if [ "${PUSHED}" = "true" ]; then
+            echo "image=${IMAGE}@${DIGEST}" >> "$GITHUB_OUTPUT"
+          else
+            echo "image=${IMAGE}:${TAG}" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          PUSHED: ${{ github.event_name != 'pull_request' }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAG: ${{ steps.meta.outputs.version }}
+
+      # Trivy の Action はタグを付け替えられた前例があるため、他と違ってコミット SHA で固定する。
+      # HIGH は表に出すだけで落とさない。先に回して、CRITICAL で落ちても一覧が残るようにする。
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.scan-ref.outputs.image }}
+          severity: HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+
+      # 修正版のある CRITICAL が残っていれば落とす。
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.scan-ref.outputs.image }}
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          skip-setup-trivy: true
