@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v7
 
       # setup-uv は浮動のメジャータグ（v10）を公開していないため、正確なバージョンで固定する。
-      - uses: astral-sh/setup-uv@v10.1.0
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
 
