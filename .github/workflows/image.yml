@@ -27,7 +27,7 @@ jobs:
       # PR ではビルドだけして push しない。壊れた Dockerfile を main に入れないための関門で、
       # fork からの PR には packages:write が付かないので login も PR では行わない。
       - if: github.event_name != 'pull_request'
-        uses: docker/login-action@v4.6.0
+        uses: docker/login-action@v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
