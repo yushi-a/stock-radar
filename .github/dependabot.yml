@@ -12,3 +12,21 @@ updates:
       github-actions:
         patterns:
           - "*"
+
+  # Dockerfile のベースイメージ（uv と python）。
+  # uv の版はロックファイルの解決規則に効くので、上がったら uv.lock との整合を CI で確かめてからマージする。
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
+    commit-message:
+      prefix: "build(docker)"
+    ignore:
+      # Python の版（3.12 → 3.13 など）は pyproject.toml の requires-python と合わせて手で上げる
+      - dependency-name: "python"
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
