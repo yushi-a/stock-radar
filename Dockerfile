@@ -2,7 +2,7 @@
 
 # uv の版は固定する。ロックファイルの解決規則は uv の版に依存するので、
 # 浮動タグにすると「手元では通るのにイメージでは別の依存が入る」が起きうる。
-FROM ghcr.io/astral-sh/uv:0.11.6 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.8 AS uv
 
 # --- ビルド層 ---------------------------------------------------------------
 FROM python:3.12-slim-bookworm AS builder
